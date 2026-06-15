@@ -16,6 +16,9 @@
       "all_frames": true
     }
   ],
+  "icons": {
+    "128": "icon128.png"
+  },
   "host_permissions": [],
   "web_accessible_resources": [
     {
