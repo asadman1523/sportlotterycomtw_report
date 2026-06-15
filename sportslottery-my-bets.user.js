@@ -1,0 +1,477 @@
+(() => {
+  "use strict";
+
+  const SUMMARY_CLASS = "slb-bet-summary";
+  const betsDatabase = new Map();
+  let cachedApiHeaders = null;
+  let cachedApiBaseUrl = null;
+  let autoCollectTriggered = false;
+
+  const TEXT = {
+    win: "\u8d0f",
+    lose: "\u8f38",
+    pending: "\u672a\u6d3e\u5f69",
+    voided: "\u9000\u56de",
+    unknown: "-",
+    bet: "\u6295\u6ce8",
+    option: "\u6295\u6ce8\u9078\u9805",
+  };
+
+  // 1. Inject Interceptor into Main World
+  function injectMainWorldScript() {
+      const script = document.createElement("script");
+      script.src = chrome.runtime.getURL("inject.js");
+      script.onload = function() {
+          this.remove();
+      };
+      (document.head || document.documentElement).appendChild(script);
+  }
+
+  // Inject main world script in all frames
+  if (location.href.includes("www-talo-ssb-pr") || location.href.includes("member.sportslottery")) {
+      injectMainWorldScript();
+  }
+
+  // 2. Listen for the Main World message in the iframe
+  window.addEventListener('message', async (e) => {
+      if (!e.data) return;
+
+      // When the iframe's Main World catches the API, it tells the iframe's Content Script
+      if (e.data.type === 'SLB_API_CAUGHT_MAIN') {
+          // If we are INSIDE the iframe, we can fetch natively without CORS!
+          if (location.href.includes("www-talo-ssb-pr") && !autoCollectTriggered) {
+              autoCollectTriggered = true;
+              cachedApiHeaders = e.data.headers;
+              cachedApiBaseUrl = e.data.baseUrl;
+              
+              // Tell parent we started
+              if (window.parent && window.parent !== window) {
+                  window.parent.postMessage({ type: 'SLB_FETCH_START' }, '*');
+              }
+              
+              // Fetch the data
+              const allBets = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders);
+              
+              // Send the massive data block to the parent!
+              if (window.parent && window.parent !== window) {
+                  window.parent.postMessage({ 
+                      type: 'SLB_DATA_FETCHED', 
+                      bets: Array.from(allBets.values())
+                  }, '*');
+              }
+          }
+      }
+      
+      // When the Parent Window receives the start signal
+      if (e.data.type === 'SLB_FETCH_START') {
+          if (!location.href.includes("my-bets")) return;
+          showModal();
+          updateStatus("正在透過背後通道拉取 30 天內的注單資料...");
+      }
+
+      // When the Parent Window receives the fetched data
+      if (e.data.type === 'SLB_DATA_FETCHED') {
+          if (!location.href.includes("my-bets")) return;
+          showModal();
+          updateStatus("資料拉取完成！正在渲染報表...");
+          if (e.data.error) {
+              updateStatus(`<span style="color:red">API 錯誤: ${e.data.error}</span>`);
+          } else {
+              renderBets(e.data.bets);
+          }
+      }
+  });
+
+  // Safe DOM manipulation wrapper
+  function onReady(fn) {
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+        setTimeout(fn, 1);
+    } else {
+        document.addEventListener("DOMContentLoaded", fn);
+    }
+  }
+
+  // 3. UI and Logic in the Main Frame
+  function ensureStyles() {
+    if (document.getElementById("slb-modal-styles")) return;
+    const style = document.createElement("style");
+    style.id = "slb-modal-styles";
+    style.textContent = `
+      #slb-modal-overlay {
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(0,0,0,0.85); z-index: 999999999;
+        display: flex; justify-content: center; align-items: center;
+        backdrop-filter: blur(5px);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        transition: opacity 0.3s ease;
+      }
+      #slb-modal-box {
+        background: #111827; width: 90vw; max-width: 1400px; height: 90vh;
+        border-radius: 16px; display: flex; flex-direction: column;
+        box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); border: 1px solid #374151;
+        overflow: hidden; color: #f3f4f6;
+        transition: all 0.3s ease;
+      }
+      .slb-modal-header {
+        padding: 20px 24px; border-bottom: 1px solid #374151;
+        display: flex; justify-content: space-between; align-items: center;
+        background: #1f2937;
+      }
+      .slb-modal-title { font-size: 20px; font-weight: 700; color: #fff; margin: 0; }
+      .slb-modal-subtitle { font-size: 14px; color: #9ca3af; margin-top: 4px; }
+      .slb-action-btns {
+        display: flex; gap: 16px; align-items: center;
+      }
+      .slb-btn {
+        background: none; border: none; color: #9ca3af; font-size: 24px;
+        cursor: pointer; transition: color 0.2s, transform 0.2s; padding: 0 4px;
+        line-height: 1; display: flex; align-items: center; justify-content: center;
+      }
+      .slb-btn:hover { color: #fff; transform: scale(1.1); }
+      .slb-modal-content {
+        flex: 1; overflow-y: auto; background: #111827;
+      }
+      .slb-table {
+        width: 100%; border-collapse: collapse; text-align: left;
+      }
+      .slb-table th {
+        background: #1f2937; color: #9ca3af; padding: 12px 16px;
+        font-weight: 600; font-size: 13px; border-bottom: 1px solid #374151;
+        position: sticky; top: 0; z-index: 10;
+      }
+      .slb-table td {
+        padding: 12px 16px; border-bottom: 1px solid #374151;
+        font-size: 14px; color: #e5e7eb; vertical-align: middle;
+      }
+      .slb-row {
+        background: #111827; transition: background 0.2s;
+      }
+      .slb-row:hover {
+        background: #1f2937;
+      }
+      .slb-date { font-size: 13px; color: #9ca3af; white-space: nowrap; }
+      .slb-type { font-weight: 600; color: #e5e7eb; white-space: nowrap; }
+      .slb-content { 
+        max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        color: #60a5fa; cursor: help;
+      }
+      .slb-amount { font-weight: 700; white-space: nowrap; }
+      .slb-amount.win { color: #34d399; }
+      
+      .slb-badge {
+        padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600;
+        white-space: nowrap; display: inline-block; text-align: center;
+      }
+      .slb-badge-pending { background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+      .slb-badge-win { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
+      .slb-badge-lose { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+      
+      .slb-loading-container {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        height: 100%; width: 100%; color: #60a5fa; grid-column: 1/-1;
+      }
+      .slb-spinner {
+        width: 48px; height: 48px; border: 4px solid rgba(96, 165, 250, 0.2);
+        border-top-color: #60a5fa; border-radius: 50%;
+        animation: slb-spin 1s linear infinite; margin-bottom: 16px;
+      }
+      @keyframes slb-spin { to { transform: rotate(360deg); } }
+
+      /* Minimized Floating Button */
+      #slb-minimized-btn {
+        position: fixed; bottom: 20px; right: 20px; z-index: 999999999;
+        background: #111827; border: 1px solid #374151; border-radius: 9999px;
+        padding: 12px 24px; color: #fff; font-weight: 600; cursor: pointer;
+        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+        display: none; align-items: center; gap: 8px; transition: transform 0.2s;
+      }
+      #slb-minimized-btn:hover { transform: scale(1.05); }
+      #slb-minimized-btn svg { width: 20px; height: 20px; color: #60a5fa; }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function showModal() {
+    onReady(() => {
+        let overlay = document.getElementById("slb-modal-overlay");
+        let miniBtn = document.getElementById("slb-minimized-btn");
+
+        if (!overlay) {
+            ensureStyles();
+            overlay = document.createElement("div");
+            overlay.id = "slb-modal-overlay";
+            overlay.innerHTML = `
+                <div id="slb-modal-box">
+                    <div class="slb-modal-header">
+                        <div>
+                            <div class="slb-modal-title">自動統計報表 (30天內)</div>
+                            <div class="slb-modal-subtitle" id="slb-status-text">正在初始化...</div>
+                        </div>
+                        <div class="slb-action-btns">
+                            <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
+                            <button class="slb-btn" id="slb-close-btn" title="關閉">&times;</button>
+                        </div>
+                    </div>
+                    <div class="slb-modal-content" id="slb-modal-content">
+                        <div class="slb-loading-container">
+                            <div class="slb-spinner"></div>
+                            <div id="slb-loading-text">正在等待攔截 API...</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            miniBtn = document.createElement("div");
+            miniBtn.id = "slb-minimized-btn";
+            miniBtn.innerHTML = `
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                展開報表
+            `;
+            document.body.appendChild(miniBtn);
+
+            document.getElementById("slb-close-btn").addEventListener("click", () => {
+                overlay.style.display = "none";
+                miniBtn.style.display = "none";
+            });
+
+            document.getElementById("slb-minimize-btn").addEventListener("click", () => {
+                overlay.style.display = "none";
+                miniBtn.style.display = "flex";
+            });
+
+            miniBtn.addEventListener("click", () => {
+                miniBtn.style.display = "none";
+                overlay.style.display = "flex";
+            });
+        } else {
+            overlay.style.display = "flex";
+            if (miniBtn) miniBtn.style.display = "none";
+        }
+    });
+  }
+
+  function updateStatus(text) {
+      const el = document.getElementById("slb-status-text");
+      const lel = document.getElementById("slb-loading-text");
+      if (el) el.innerHTML = text;
+      if (lel) lel.innerHTML = text;
+  }
+
+  function renderBets(betsArray) {
+      const container = document.getElementById("slb-modal-content");
+      if (!container) return;
+      container.innerHTML = "";
+
+      const sortedBets = betsArray.sort((a, b) => {
+          return new Date(b.createdDate) - new Date(a.createdDate);
+      });
+
+      if (sortedBets.length === 0) {
+          container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #9ca3af;">沒有找到任何注單記錄。</div>`;
+          return;
+      }
+      
+      console.log("ALL BETS:", sortedBets);
+
+      let totalBet = 0;
+      let settledBet = 0;
+      let settledReturn = 0;
+
+      let tableHtml = `
+          <table class="slb-table">
+              <thead>
+                  <tr>
+                      <th>時間</th>
+                      <th>玩法</th>
+                      <th>投注內容</th>
+                      <th>投注額</th>
+                      <th>預計/實際派彩</th>
+                      <th>狀態</th>
+                  </tr>
+              </thead>
+              <tbody>
+      `;
+
+      sortedBets.forEach(b => {
+          totalBet += (b.totalStake || 0);
+          
+          let badgeClass = "slb-badge-pending";
+          let badgeText = TEXT.pending;
+          let isWin = false;
+          
+          let displayReturn = b.totalReturn || 0;
+
+          if (["Settled", "CashedOut", "Closed", "Won", "Lost"].includes(b.betState)) {
+              settledBet += (b.totalStake || 0);
+              settledReturn += displayReturn;
+              if (displayReturn > 0) {
+                  badgeClass = "slb-badge-win";
+                  badgeText = TEXT.win;
+                  isWin = true;
+              } else {
+                  badgeClass = "slb-badge-lose";
+                  badgeText = TEXT.lose;
+              }
+          } else if (b.betState === "Void" || b.betState === "Cancelled") {
+              badgeClass = "slb-badge-pending";
+              badgeText = TEXT.voided;
+              // Void bets are settled but usually return stake. We count them in settled
+              settledBet += (b.totalStake || 0);
+              settledReturn += displayReturn;
+          }
+
+          let createdDate = b.createdDate || "Invalid Date";
+          if (createdDate !== "Invalid Date") {
+              const d = new Date(createdDate.replace(' ', 'T'));
+              if (!isNaN(d.getTime())) {
+                  createdDate = d.toLocaleString('zh-TW', {
+                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                  });
+              }
+          }
+
+          let contentText = "";
+          let fullContentText = "";
+          if (b.legs && b.legs.length > 0) {
+              const legTexts = b.legs.map(leg => `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}`);
+              contentText = legTexts.join(" | ");
+              fullContentText = legTexts.join("&#10;");
+          } else {
+              contentText = "無法讀取詳細資訊";
+              fullContentText = "無法讀取詳細資訊";
+          }
+
+          tableHtml += `
+              <tr class="slb-row">
+                  <td class="slb-date">${createdDate}</td>
+                  <td class="slb-type">${b.betTypeName || "單場"}</td>
+                  <td class="slb-content" title="${fullContentText}">${contentText}</td>
+                  <td class="slb-amount">NT$ ${b.totalStake}</td>
+                  <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
+                  <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
+              </tr>
+          `;
+      });
+      
+      tableHtml += `</tbody></table>`;
+      container.innerHTML = tableHtml;
+
+      const summaryEl = document.getElementById("slb-status-text");
+      if (summaryEl) {
+          const pl = settledReturn - settledBet;
+          summaryEl.innerHTML = `共 <b>${sortedBets.length}</b> 筆 | 總投注: <b>NT$ ${totalBet}</b> | 已結算總投注: <b>NT$ ${settledBet}</b> | 總派彩: <b><span style="color:#34d399">NT$ ${settledReturn}</span></b> | 損益: <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>`;
+      }
+  }
+
+  // NATIVE FETCH INSIDE IFRAME (Same-Origin, NO CORS ERRORS!)
+  async function fetchAllDataNatively(baseUrl, headers) {
+      let finalBaseUrl = baseUrl;
+      if (!finalBaseUrl.startsWith("http")) {
+           finalBaseUrl = "https://www-talo-ssb-pr.sportslottery.com.tw" + (finalBaseUrl.startsWith('/') ? '' : '/') + finalBaseUrl;
+      }
+
+      const today = new Date();
+      const past30 = new Date();
+      past30.setDate(today.getDate() - 30);
+      
+      const localDatabase = new Map();
+
+      // Format date exactly like the native site: YYYY-MM-DDTHH:mm:ss.SSS without 'Z'
+      function formatLocal(d) {
+          const pad = n => n.toString().padStart(2, '0');
+          return d.getFullYear() + '-' +
+                 pad(d.getMonth() + 1) + '-' +
+                 pad(d.getDate()) + 'T' +
+                 pad(d.getHours()) + ':' +
+                 pad(d.getMinutes()) + ':' +
+                 pad(d.getSeconds()) + '.' +
+                 d.getMilliseconds().toString().padStart(3, '0');
+      }
+
+      const fromStr = formatLocal(past30);
+      const toStr = formatLocal(today);
+
+      async function fetchState(betState) {
+          let pageNum = 0;
+          let hasMore = true;
+
+          while (hasMore && pageNum < 10) {
+              const params = new URLSearchParams({
+                  from: fromStr,
+                  to: toStr,
+                  orderBy: 0,
+                  pageNumber: pageNum,
+                  pageSize: 50,
+                  orderDesc: true
+              });
+              
+              if (betState === "Opened") {
+                  params.append("betStateTypes", "Opened");
+                  params.append("betOutcomes", "NotSpecified");
+              } else if (betState === "Settled") {
+                  params.append("betStateTypes", "Closed,Settled,Cancelled");
+                  params.append("betOutcomes", "NotSpecified");
+              }
+
+              // ensure + is not encoded or whatever, just standard URLSearchParams is fine.
+              const targetUrl = finalBaseUrl + "?" + params.toString();
+
+              try {
+                  const resp = await window.fetch(targetUrl, {
+                      method: "GET",
+                      headers: headers
+                  });
+
+                  if (!resp.ok) {
+                      if (window.parent) window.parent.postMessage({ type: 'SLB_DATA_FETCHED', error: `HTTP ${resp.status} - ${await resp.text()}` }, '*');
+                      break;
+                  }
+
+                  const text = await resp.text();
+                  if (!text || text.trim() === "") {
+                      hasMore = false;
+                      break;
+                  }
+
+                  const data = JSON.parse(text);
+                  if (data && data.length > 0) {
+                      data.forEach(item => {
+                          if (item.fullExternalReference) {
+                              const betId = item.fullExternalReference;
+                              if (!localDatabase.has(betId)) {
+                                  localDatabase.set(betId, {
+                                      id: betId,
+                                      createdDate: item.tsAttempted,
+                                      betTypeName: item.betTypeName,
+                                      betState: item.betState,
+                                      totalStake: item.totalStake || item.wunitStake || 0,
+                                      totalReturn: item.betState === 'Open' ? item.potentialReturn : (item.totalReturn || item.discountedTotalReturn || 0),
+                                      legs: []
+                                  });
+                              }
+                              localDatabase.get(betId).legs.push({
+                                  eventName: item.eventName,
+                                  marketName: item.marketName,
+                                  selectionName: item.selectionName
+                              });
+                          }
+                      });
+                      if (data.length < 50) hasMore = false;
+                      else pageNum++;
+                  } else {
+                      hasMore = false;
+                  }
+              } catch (e) {
+                  if (window.parent) window.parent.postMessage({ type: 'SLB_DATA_FETCHED', error: `Fetch failed: ${e.message}` }, '*');
+                  break;
+              }
+          }
+      }
+
+      await fetchState("Opened");
+      await fetchState("Settled");
+      
+      return localDatabase;
+  }
+})();

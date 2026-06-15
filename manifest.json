@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Sports Lottery My Bets Compact List",
+  "version": "0.2.0",
+  "description": "Adds compact expandable summaries to Taiwan Sports Lottery my-bets.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://member.sportslottery.com.tw/*",
+        "https://www-talo-ssb-pr.sportslottery.com.tw/*"
+      ],
+      "js": [
+        "sportslottery-my-bets.user.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "host_permissions": [],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

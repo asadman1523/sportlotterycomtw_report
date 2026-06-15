@@ -1,0 +1,32 @@
+name: Build and Release Extension
+
+on:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Zip Extension Files
+        run: |
+          zip -r sportslottery-extension.zip manifest.json inject.js sportslottery-my-bets.user.js README.md
+        
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: sportslottery-extension.zip
+          tag_name: v${{ github.run_number }}
+          name: Release v${{ github.run_number }}
+          body: Auto-generated release from latest push.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
