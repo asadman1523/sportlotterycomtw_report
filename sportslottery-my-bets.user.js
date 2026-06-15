@@ -347,6 +347,7 @@
       let settledReturn = 0;
       let lostStake = 0;
       let winProfit = 0;
+      let pendingStake = 0;
 
       let tableHtml = `
           <table class="slb-table">
@@ -391,6 +392,8 @@
               // Void bets are settled but usually return stake. We count them in settled
               settledBet += (b.totalStake || 0);
               settledReturn += displayReturn;
+          } else {
+              pendingStake += (b.totalStake || 0);
           }
 
           let createdDate = b.createdDate || "Invalid Date";
@@ -432,7 +435,7 @@
       const summaryEl = document.getElementById("slb-status-text");
       if (summaryEl) {
           const pl = settledReturn - settledBet;
-          summaryEl.innerHTML = `共 <b>${sortedBets.length}</b> 筆 | 總投入: <b>NT$ ${totalBet}</b> | 獲利: <b><span style="color:#34d399">NT$ ${winProfit}</span></b> | 虧損: <b><span style="color:#f87171">NT$ ${lostStake}</span></b> | 淨損益: <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>`;
+          summaryEl.innerHTML = `共 <b>${sortedBets.length}</b> 筆 | 總投入: <b>NT$ ${totalBet}</b> | 未派彩: <b><span style="color:#fcd34d">NT$ ${pendingStake}</span></b> | 獲利: <b><span style="color:#34d399">NT$ ${winProfit}</span></b> | 虧損: <b><span style="color:#f87171">NT$ ${lostStake}</span></b> | 淨損益: <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>`;
       }
   }
 
