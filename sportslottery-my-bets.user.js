@@ -496,17 +496,6 @@
               }
           }
 
-          let contentText = "";
-          let fullContentText = "";
-          if (b.legs && b.legs.length > 0) {
-              const legTexts = b.legs.map(leg => `[${leg.eventName || '未知'}] ${leg.marketName || ''} - ${leg.selectionName || ''}`);
-              contentText = legTexts.join(" | ");
-              fullContentText = legTexts.join("\n");
-          } else {
-              contentText = "無法讀取詳細資訊";
-              fullContentText = "無法讀取詳細資訊";
-          }
-          
           const escapeHTML = (str) => {
               return String(str).replace(/&/g, "&amp;")
                                 .replace(/</g, "&lt;")
@@ -515,11 +504,33 @@
                                 .replace(/'/g, "&#039;");
           };
 
+          let contentText = "";
+          let fullContentText = "";
+          if (b.legs && b.legs.length > 0) {
+              const htmlLegTexts = b.legs.map(leg => {
+                  const ev = escapeHTML(leg.eventName || '未知');
+                  const mk = escapeHTML(leg.marketName || '');
+                  const sel = escapeHTML(leg.selectionName || '');
+                  return `[${ev}] ${mk} - <b>${sel}</b>`;
+              });
+              const plainLegTexts = b.legs.map(leg => {
+                  const ev = escapeHTML(leg.eventName || '未知');
+                  const mk = escapeHTML(leg.marketName || '');
+                  const sel = escapeHTML(leg.selectionName || '');
+                  return `[${ev}] ${mk} - ${sel}`;
+              });
+              contentText = htmlLegTexts.join(" <span style='color:#6b7280'>|</span> ");
+              fullContentText = plainLegTexts.join("\n");
+          } else {
+              contentText = "無法讀取詳細資訊";
+              fullContentText = "無法讀取詳細資訊";
+          }
+
           tableHtml += `
               <tr class="slb-row">
                   <td class="slb-date">${createdDate}</td>
                   <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
-                  <td class="slb-content" title="${escapeHTML(fullContentText)}">${escapeHTML(contentText)}</td>
+                  <td class="slb-content" title="${fullContentText}">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
                   <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
