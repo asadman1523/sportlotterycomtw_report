@@ -19,7 +19,27 @@ jobs:
 
       - name: Zip Extension Files
         run: |
-          zip -r sportslottery-extension.zip manifest.json inject.js sportslottery-my-bets.user.js README.md
+          set -euo pipefail
+          files=(
+            manifest.json
+            sportslottery-my-bets.user.js
+            inject.js
+            icon128.png
+            README.md
+            PRIVACY.md
+          )
+          for file in "${files[@]}"; do
+            test -f "$file"
+          done
+          zip -r sportslottery-extension.zip "${files[@]}"
+
+      - name: Verify Extension Package
+        run: |
+          set -euo pipefail
+          unzip -l sportslottery-extension.zip
+          for file in manifest.json sportslottery-my-bets.user.js inject.js icon128.png README.md PRIVACY.md; do
+            unzip -Z1 sportslottery-extension.zip | grep -qx "$file"
+          done
         
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
