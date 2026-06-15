@@ -496,6 +496,8 @@
       if (!finalBaseUrl.startsWith("http")) {
            finalBaseUrl = "https://www-talo-ssb-pr.sportslottery.com.tw" + (finalBaseUrl.startsWith('/') ? '' : '/') + finalBaseUrl;
       }
+      
+      const localDatabase = new Map();
 
       let fromStr, toStr;
       if (queryStr) {
