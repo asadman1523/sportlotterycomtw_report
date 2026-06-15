@@ -62,6 +62,23 @@
           }
       }
       
+      // When the iframe receives a manual fetch command from the Parent
+      if (e.data.type === 'SLB_FETCH_MANUAL') {
+          if (location.href.includes("www-talo-ssb-pr")) {
+              if (cachedApiBaseUrl && cachedApiHeaders) {
+                  // Fetch the data
+                  fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr).then(allBets => {
+                      if (window.parent && window.parent !== window) {
+                          window.parent.postMessage({ 
+                              type: 'SLB_DATA_FETCHED', 
+                              bets: Array.from(allBets.values())
+                          }, '*');
+                      }
+                  });
+              }
+          }
+      }
+      
       // When the Parent Window receives the start signal
       if (e.data.type === 'SLB_FETCH_START') {
           if (!location.href.includes("my-bets")) return;
@@ -204,8 +221,15 @@
                 <div id="slb-modal-box">
                     <div class="slb-modal-header">
                         <div>
-                            <div class="slb-modal-title" id="slb-dynamic-title">自動統計報表</div>
-                            <div class="slb-modal-subtitle" id="slb-status-text">正在初始化...</div>
+                            <div class="slb-modal-title">自動統計報表</div>
+                            <div style="margin-top: 8px; font-size: 14px; color: #d1d5db; display: flex; align-items: center; gap: 8px;">
+                                📅 查詢區間：
+                                <input type="date" id="slb-date-from" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
+                                <span>~</span>
+                                <input type="date" id="slb-date-to" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
+                                <button id="slb-date-search" class="slb-btn" style="background:#2563eb; color:#fff; padding:2px 8px; border-radius:4px;">搜尋</button>
+                            </div>
+                            <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在初始化...</div>
                         </div>
                         <div class="slb-action-btns">
                             <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
@@ -262,6 +286,49 @@
                 miniBtn.style.display = "none";
                 overlay.style.display = "flex";
             });
+            
+            // Init date inputs
+            const fromEl = document.getElementById("slb-date-from");
+            const toEl = document.getElementById("slb-date-to");
+            if (fromEl && toEl) {
+                const today = new Date();
+                const past30 = new Date(); past30.setDate(today.getDate() - 30);
+                const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
+                fromEl.value = formatD(past30);
+                toEl.value = formatD(today);
+            }
+
+            document.getElementById("slb-date-search").addEventListener("click", () => {
+                const fv = document.getElementById("slb-date-from").value;
+                const tv = document.getElementById("slb-date-to").value;
+                if (!fv || !tv) return;
+                
+                const newQs = `from=${fv}T00:00:00.000&to=${tv}T23:59:59.999`;
+                
+                const statusEl = document.getElementById("slb-status-text");
+                if(statusEl) statusEl.innerHTML = "正在拉取指定區間...";
+                
+                const contentEl = document.getElementById("slb-modal-content");
+                if (contentEl) {
+                    contentEl.innerHTML = `
+                        <div class="slb-loading-container">
+                            <div class="slb-spinner"></div>
+                            <div id="slb-loading-text">資料載入中...</div>
+                        </div>
+                    `;
+                }
+
+                // Send message to IFRAME to fetch
+                const frames = document.getElementsByTagName('iframe');
+                for (let i = 0; i < frames.length; i++) {
+                    frames[i].contentWindow.postMessage({
+                        type: 'SLB_FETCH_MANUAL',
+                        queryStr: newQs
+                    }, '*');
+                }
+            });
+        } else {
+            overlay.style.display = "flex";
         }
     });
   }
@@ -467,12 +534,16 @@
       if (summaryEl) {
           const pl = settledReturn - settledBet;
           summaryEl.innerHTML = `
-            <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; margin-right:8px;">
-                💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span style="color:#fcd34d">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
-            </span>
-            <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px;">
-                🏆 <b>結算戰績</b>：總派彩 <span style="color:#34d399">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>
-            </span>
+            <div style="margin-bottom:6px;">
+                <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; margin-right:8px;">
+                    💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span style="color:#fcd34d">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
+                </span>
+            </div>
+            <div>
+                <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px;">
+                    🏆 <b>結算戰績</b>：總派彩 <span style="color:#34d399">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>
+                </span>
+            </div>
           `;
       }
       
@@ -527,12 +598,7 @@
           toStr = formatLocal(today);
       }
       
-      const titleEl = document.getElementById("slb-dynamic-title");
-      if (titleEl) {
-          const fD = fromStr.split('T')[0];
-          const tD = toStr.split('T')[0];
-          titleEl.innerText = `自動統計報表 (${fD} ~ ${tD})`;
-      }
+
 
       async function fetchState(betState) {
           let pageNum = 0;
