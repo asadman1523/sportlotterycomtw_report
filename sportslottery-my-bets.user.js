@@ -183,7 +183,7 @@
         background: #111827; border: 1px solid #374151; border-radius: 9999px;
         padding: 12px 24px; color: #fff; font-weight: 600; cursor: pointer;
         box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
-        display: none; align-items: center; gap: 8px; transition: transform 0.2s;
+        display: flex; align-items: center; gap: 8px; transition: transform 0.2s;
       }
       #slb-minimized-btn:hover { transform: scale(1.05); }
       #slb-minimized-btn svg { width: 20px; height: 20px; color: #60a5fa; }
@@ -226,9 +226,13 @@
             miniBtn.id = "slb-minimized-btn";
             miniBtn.innerHTML = `
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                展開報表
+                台灣運彩投注報表
             `;
             document.body.appendChild(miniBtn);
+            
+            // 預設為縮小狀態
+            overlay.style.display = "none";
+            miniBtn.style.display = "flex";
 
             document.getElementById("slb-close-btn").addEventListener("click", () => {
                 overlay.style.display = "none";
@@ -244,9 +248,6 @@
                 miniBtn.style.display = "none";
                 overlay.style.display = "flex";
             });
-        } else {
-            overlay.style.display = "flex";
-            if (miniBtn) miniBtn.style.display = "none";
         }
     });
   }
