@@ -208,6 +208,9 @@
                             <div class="slb-modal-subtitle" id="slb-status-text">正在初始化...</div>
                         </div>
                         <div class="slb-action-btns">
+                            <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
+                                <input type="checkbox" id="slb-auto-open-cb" style="cursor:pointer; width:16px; height:16px;"> 預設打開
+                            </label>
                             <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">📥 匯出 CSV</button>
                             <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
                             <button class="slb-btn" id="slb-close-btn" title="關閉">&times;</button>
@@ -231,9 +234,22 @@
             `;
             document.body.appendChild(miniBtn);
             
-            // 預設為縮小狀態
-            overlay.style.display = "none";
-            miniBtn.style.display = "flex";
+            const autoOpenCb = document.getElementById("slb-auto-open-cb");
+            const isAutoOpen = localStorage.getItem("slb_auto_open") === "true";
+            autoOpenCb.checked = isAutoOpen;
+            
+            autoOpenCb.addEventListener("change", (e) => {
+                localStorage.setItem("slb_auto_open", e.target.checked ? "true" : "false");
+            });
+            
+            // 根據設定決定預設狀態
+            if (isAutoOpen) {
+                overlay.style.display = "flex";
+                miniBtn.style.display = "none";
+            } else {
+                overlay.style.display = "none";
+                miniBtn.style.display = "flex";
+            }
 
             document.getElementById("slb-close-btn").addEventListener("click", () => {
                 overlay.style.display = "none";
