@@ -24,10 +24,13 @@
                 if (args[1] && args[1].headers) extractFrom(args[1].headers);
             } catch(e) {}
             
+            let qs = "";
+            if (url && url.includes('?')) qs = url.split('?')[1];
             window.postMessage({
                 type: 'SLB_API_CAUGHT_MAIN',
                 headers: extractedHeaders,
-                baseUrl: url.split('?')[0]
+                baseUrl: url.split('?')[0],
+                queryStr: qs
             }, '*');
         }
         return originalFetch.apply(this, args);
@@ -36,11 +39,14 @@
     const originalXHRSend = window.XMLHttpRequest.prototype.send;
     window.XMLHttpRequest.prototype.send = function(body) {
         if (this._url && this._url.match(/betting\/fo\/bets/i)) {
+            let qs = "";
+            if (this._url && this._url.includes('?')) qs = this._url.split('?')[1];
             try {
                 window.postMessage({
                     type: 'SLB_API_CAUGHT_MAIN',
                     headers: this._requestHeaders || {},
-                    baseUrl: this._url.split('?')[0]
+                    baseUrl: this._url.split('?')[0],
+                    queryStr: qs
                 }, '*');
             } catch(e) {}
         }

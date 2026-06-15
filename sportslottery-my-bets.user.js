@@ -50,7 +50,7 @@
               }
               
               // Fetch the data
-              const allBets = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders);
+              const allBets = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr);
               
               // Send the massive data block to the parent!
               if (window.parent && window.parent !== window) {
@@ -204,7 +204,7 @@
                 <div id="slb-modal-box">
                     <div class="slb-modal-header">
                         <div>
-                            <div class="slb-modal-title">自動統計報表 (30天內)</div>
+                            <div class="slb-modal-title" id="slb-dynamic-title">自動統計報表</div>
                             <div class="slb-modal-subtitle" id="slb-status-text">正在初始化...</div>
                         </div>
                         <div class="slb-action-btns">
@@ -432,19 +432,27 @@
           let contentText = "";
           let fullContentText = "";
           if (b.legs && b.legs.length > 0) {
-              const legTexts = b.legs.map(leg => `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}`);
+              const legTexts = b.legs.map(leg => `[${leg.eventName || '未知'}] ${leg.marketName || ''} - ${leg.selectionName || ''}`);
               contentText = legTexts.join(" | ");
-              fullContentText = legTexts.join("&#10;");
+              fullContentText = legTexts.join("\n");
           } else {
               contentText = "無法讀取詳細資訊";
               fullContentText = "無法讀取詳細資訊";
           }
+          
+          const escapeHTML = (str) => {
+              return String(str).replace(/&/g, "&amp;")
+                                .replace(/</g, "&lt;")
+                                .replace(/>/g, "&gt;")
+                                .replace(/"/g, "&quot;")
+                                .replace(/'/g, "&#039;");
+          };
 
           tableHtml += `
               <tr class="slb-row">
                   <td class="slb-date">${createdDate}</td>
-                  <td class="slb-type">${b.betTypeName || "單場"}</td>
-                  <td class="slb-content" title="${fullContentText}">${contentText}</td>
+                  <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
+                  <td class="slb-content" title="${escapeHTML(fullContentText)}">${escapeHTML(contentText)}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
                   <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
@@ -483,32 +491,46 @@
   }
 
   // NATIVE FETCH INSIDE IFRAME (Same-Origin, NO CORS ERRORS!)
-  async function fetchAllDataNatively(baseUrl, headers) {
+  async function fetchAllDataNatively(baseUrl, headers, queryStr) {
       let finalBaseUrl = baseUrl;
       if (!finalBaseUrl.startsWith("http")) {
            finalBaseUrl = "https://www-talo-ssb-pr.sportslottery.com.tw" + (finalBaseUrl.startsWith('/') ? '' : '/') + finalBaseUrl;
       }
 
-      const today = new Date();
-      const past30 = new Date();
-      past30.setDate(today.getDate() - 30);
-      
-      const localDatabase = new Map();
-
-      // Format date exactly like the native site: YYYY-MM-DDTHH:mm:ss.SSS without 'Z'
-      function formatLocal(d) {
-          const pad = n => n.toString().padStart(2, '0');
-          return d.getFullYear() + '-' +
-                 pad(d.getMonth() + 1) + '-' +
-                 pad(d.getDate()) + 'T' +
-                 pad(d.getHours()) + ':' +
-                 pad(d.getMinutes()) + ':' +
-                 pad(d.getSeconds()) + '.' +
-                 d.getMilliseconds().toString().padStart(3, '0');
+      let fromStr, toStr;
+      if (queryStr) {
+          try {
+              const params = new URLSearchParams(queryStr);
+              if (params.get("from")) fromStr = params.get("from");
+              if (params.get("to")) toStr = params.get("to");
+          } catch(e) {}
       }
 
-      const fromStr = formatLocal(past30);
-      const toStr = formatLocal(today);
+      if (!fromStr || !toStr) {
+          const today = new Date();
+          const past30 = new Date();
+          past30.setDate(today.getDate() - 30);
+          
+          function formatLocal(d) {
+              const pad = n => n.toString().padStart(2, '0');
+              return d.getFullYear() + '-' +
+                     pad(d.getMonth() + 1) + '-' +
+                     pad(d.getDate()) + 'T' +
+                     pad(d.getHours()) + ':' +
+                     pad(d.getMinutes()) + ':' +
+                     pad(d.getSeconds()) + '.' +
+                     d.getMilliseconds().toString().padStart(3, '0');
+          }
+          fromStr = formatLocal(past30);
+          toStr = formatLocal(today);
+      }
+      
+      const titleEl = document.getElementById("slb-dynamic-title");
+      if (titleEl) {
+          const fD = fromStr.split('T')[0];
+          const tD = toStr.split('T')[0];
+          titleEl.innerText = `自動統計報表 (${fD} ~ ${tD})`;
+      }
 
       async function fetchState(betState) {
           let pageNum = 0;

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "台灣運彩投注報表",
+  "name": "運彩視覺化UI",
   "version": "1.0.0",
   "description": "自動統計與彙整台灣運彩30天內的歷史投注報表",
   "content_scripts": [
