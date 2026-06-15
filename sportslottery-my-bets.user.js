@@ -556,13 +556,22 @@
           }
 
           tableHtml += `
-              <tr class="slb-row">
+              <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onmouseover="this.style.background='#1f2937'" onmouseout="this.style.background='transparent'" onclick="const n = this.nextElementSibling; if(n && n.classList.contains('slb-row-details')){ n.style.display = n.style.display === 'none' ? 'table-row' : 'none'; }">
                   <td class="slb-date">${createdDate}</td>
                   <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
-                  <td class="slb-content" title="${fullContentText}">${contentText}</td>
+                  <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
                   <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
+              </tr>
+              <tr class="slb-row-details" style="display:none; background:#111827;">
+                  <td colspan="6" style="text-align:left; padding:10px 16px; font-size:13px; color:#9ca3af; border-top:none; border-bottom:1px solid #374151;">
+                      <div style="display:flex; gap:24px; align-items:center;">
+                          <div><b style="color:#d1d5db;">投注代碼：</b> <span style="user-select:all;">${escapeHTML(b.ticketId || b.id || '無')}</span></div>
+                          <div><b style="color:#d1d5db;">投注 ID：</b> <span style="user-select:all;">${escapeHTML(b.id || '無')}</span></div>
+                          <div style="margin-left:auto; font-size:12px; color:#6b7280;">點擊投注內容可展開多關明細</div>
+                      </div>
+                  </td>
               </tr>
           `;
       });
@@ -575,12 +584,12 @@
           const pl = settledReturn - settledBet;
           summaryEl.innerHTML = `
             <div style="margin-bottom:6px;">
-                <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; margin-right:8px;">
+                <span style="display:inline-block; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; margin-right:8px;">
                     💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span style="color:#fcd34d">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
                 </span>
             </div>
             <div>
-                <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px;">
+                <span style="display:inline-block; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px;">
                     🏆 <b>結算戰績</b>：總派彩 <span style="color:#34d399">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>
                 </span>
             </div>
@@ -701,6 +710,7 @@
                                       betState: item.betState,
                                       totalStake: item.totalStake || item.wunitStake || 0,
                                       totalReturn: item.betState === 'Open' ? item.potentialReturn : (item.totalReturn || item.discountedTotalReturn || 0),
+                                      ticketId: item.ticketId || item.receipt || item.externalRef || item.shortId || '',
                                       legs: []
                                   });
                               }
