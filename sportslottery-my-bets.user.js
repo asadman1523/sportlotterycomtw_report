@@ -329,6 +329,7 @@
       let totalBet = 0;
       let settledBet = 0;
       let settledReturn = 0;
+      let lostStake = 0;
 
       let tableHtml = `
           <table class="slb-table">
@@ -364,6 +365,7 @@
               } else {
                   badgeClass = "slb-badge-lose";
                   badgeText = TEXT.lose;
+                  lostStake += (b.totalStake || 0);
               }
           } else if (b.betState === "Void" || b.betState === "Cancelled") {
               badgeClass = "slb-badge-pending";
@@ -412,7 +414,7 @@
       const summaryEl = document.getElementById("slb-status-text");
       if (summaryEl) {
           const pl = settledReturn - settledBet;
-          summaryEl.innerHTML = `共 <b>${sortedBets.length}</b> 筆 | 總投注: <b>NT$ ${totalBet}</b> | 已結算總投注: <b>NT$ ${settledBet}</b> | 總派彩: <b><span style="color:#34d399">NT$ ${settledReturn}</span></b> | 損益: <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>`;
+          summaryEl.innerHTML = `共 <b>${sortedBets.length}</b> 筆 | 總投注: <b>NT$ ${totalBet}</b> | 已結算: <b>NT$ ${settledBet}</b> | 打水漂: <b><span style="color:#f87171">NT$ ${lostStake}</span></b> | 總派彩: <b><span style="color:#34d399">NT$ ${settledReturn}</span></b> | 淨損益: <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>`;
       }
   }
 
