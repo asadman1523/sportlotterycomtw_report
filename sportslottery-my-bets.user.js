@@ -208,6 +208,7 @@
                             <div class="slb-modal-subtitle" id="slb-status-text">正在初始化...</div>
                         </div>
                         <div class="slb-action-btns">
+                            <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">📥 匯出 CSV</button>
                             <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
                             <button class="slb-btn" id="slb-close-btn" title="關閉">&times;</button>
                         </div>
@@ -244,6 +245,8 @@
                 miniBtn.style.display = "flex";
             });
 
+            document.getElementById("slb-export-btn").addEventListener("click", exportCSV);
+
             miniBtn.addEventListener("click", () => {
                 miniBtn.style.display = "none";
                 overlay.style.display = "flex";
@@ -257,6 +260,54 @@
       const lel = document.getElementById("slb-loading-text");
       if (el) el.innerHTML = text;
       if (lel) lel.innerHTML = text;
+  }
+
+  function exportCSV() {
+      if (!window.currentSLBBets || window.currentSLBBets.length === 0) {
+          alert("目前沒有資料可匯出！");
+          return;
+      }
+      
+      let csvContent = "\uFEFF"; // BOM for UTF-8 Excel compatibility
+      csvContent += "下注時間,玩法,投注內容,投注額,預計/實際派彩,狀態\n";
+      
+      window.currentSLBBets.forEach(b => {
+          let createdDate = b.createdDate || "Invalid Date";
+          if (createdDate !== "Invalid Date") {
+              const d = new Date(createdDate.replace(' ', 'T'));
+              if (!isNaN(d.getTime())) {
+                  createdDate = d.toLocaleString('zh-TW', {
+                      year: 'numeric', month: '2-digit', day: '2-digit', 
+                      hour: '2-digit', minute: '2-digit'
+                  });
+              }
+          }
+          
+          let legTexts = b.legs ? b.legs.map(leg => `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}`) : [];
+          let contentText = legTexts.join(" | ");
+          contentText = '"' + contentText.replace(/"/g, '""') + '"'; // Escape quotes for CSV
+          
+          let stateText = b.betState;
+          let displayReturn = b.totalReturn || 0;
+          if (["Settled", "CashedOut", "Closed", "Won", "Lost"].includes(b.betState)) {
+               stateText = displayReturn > 0 ? "贏" : "輸";
+          } else if (b.betState === "Void" || b.betState === "Cancelled") {
+               stateText = "退回";
+          } else {
+               stateText = "未派彩";
+          }
+          
+          csvContent += `${createdDate},${b.betTypeName || "單場"},${contentText},${b.totalStake},${displayReturn},${stateText}\n`;
+      });
+      
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `運彩投注報表_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
   }
 
   function renderBets(betsArray) {
@@ -273,7 +324,7 @@
           return;
       }
       
-      console.log("ALL BETS:", sortedBets);
+      window.currentSLBBets = sortedBets;
 
       let totalBet = 0;
       let settledBet = 0;
@@ -283,7 +334,7 @@
           <table class="slb-table">
               <thead>
                   <tr>
-                      <th>時間</th>
+                      <th>下注時間</th>
                       <th>玩法</th>
                       <th>投注內容</th>
                       <th>投注額</th>
