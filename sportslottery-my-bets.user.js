@@ -342,6 +342,9 @@
           } else if (window.slbSortCol === 'return') {
               valA = a.totalReturn || 0;
               valB = b.totalReturn || 0;
+          } else if (window.slbSortCol === 'state') {
+              valA = a.betState || "";
+              valB = b.betState || "";
           }
 
           if (valA < valB) return window.slbSortDesc ? 1 : -1;
@@ -378,7 +381,7 @@
                       <th>投注內容</th>
                       <th data-sort="stake" style="cursor:pointer; user-select:none;" title="點擊排序">投注額 ${getSortIcon('stake')}</th>
                       <th data-sort="return" style="cursor:pointer; user-select:none;" title="點擊排序">預計/實際派彩 ${getSortIcon('return')}</th>
-                      <th>狀態</th>
+                      <th data-sort="state" style="cursor:pointer; user-select:none;" title="點擊排序">狀態 ${getSortIcon('state')}</th>
                   </tr>
               </thead>
               <tbody>
