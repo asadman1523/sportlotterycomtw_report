@@ -3,9 +3,15 @@
 
   const SUMMARY_CLASS = "slb-bet-summary";
   const betsDatabase = new Map();
+  const DISCLAIMER_ACCEPTED_KEY = "slb_disclaimer_accepted_v1";
+  const DISCLAIMER_TEXT = "免責聲明：本工具僅供個人記帳與參考，統計結果不代表官方帳務；所有投注紀錄、派彩與結算資訊皆以台灣運彩官方系統為準。本工具與台灣運彩官方無關。";
   let cachedApiHeaders = null;
   let cachedApiBaseUrl = null;
+  let cachedApiQueryStr = null;
   let autoCollectTriggered = false;
+  let disclaimerAcceptedInThisPage = false;
+  let disclaimerStorageLoaded = false;
+  const disclaimerStorageReady = loadDisclaimerAccepted();
 
   const TEXT = {
     win: "\u8d0f",
@@ -39,46 +45,44 @@
       // When the iframe's Main World catches the API, it tells the iframe's Content Script
       if (e.data.type === 'SLB_API_CAUGHT_MAIN') {
           // If we are INSIDE the iframe, we can fetch natively without CORS!
-          if (location.href.includes("www-talo-ssb-pr") && !autoCollectTriggered) {
-              autoCollectTriggered = true;
+          if (location.href.includes("www-talo-ssb-pr")) {
               cachedApiHeaders = e.data.headers;
               cachedApiBaseUrl = e.data.baseUrl;
-              
-              // Tell parent we started
-              if (window.parent && window.parent !== window) {
-                  window.parent.postMessage({ type: 'SLB_FETCH_START' }, '*');
+              cachedApiQueryStr = e.data.queryStr;
+              const acceptedDisclaimer = await ensureDisclaimerStateLoaded();
+              if (!autoCollectTriggered && acceptedDisclaimer) {
+                  autoCollectTriggered = true;
+                  await fetchAndPostData(cachedApiQueryStr);
+              } else if (!acceptedDisclaimer && window.parent && window.parent !== window) {
+                  window.parent.postMessage({ type: 'SLB_DISCLAIMER_REQUIRED' }, '*');
               }
-              
-              // Fetch the data
-              const fetchResult = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr);
-              
-              // Send the massive data block to the parent!
-              if (window.parent && window.parent !== window) {
-                  window.parent.postMessage({ 
-                      type: 'SLB_DATA_FETCHED', 
-                      bets: Array.from(fetchResult.bets.values()),
-                      fromStr: fetchResult.fromStr,
-                      toStr: fetchResult.toStr
-                  }, '*');
-              }
+          }
+      }
+
+      if (e.data.type === 'SLB_DISCLAIMER_REQUIRED') {
+          if (!location.href.includes("my-bets")) return;
+          showModal();
+          if (await ensureDisclaimerStateLoaded()) {
+              broadcastDisclaimerAccepted();
+          } else {
+              showDisclaimerNotice();
+          }
+      }
+
+      if (e.data.type === 'SLB_DISCLAIMER_ACCEPTED') {
+          disclaimerAcceptedInThisPage = true;
+          if (location.href.includes("www-talo-ssb-pr") && cachedApiBaseUrl && cachedApiHeaders && !autoCollectTriggered) {
+              autoCollectTriggered = true;
+              await fetchAndPostData(cachedApiQueryStr);
           }
       }
       
       // When the iframe receives a manual fetch command from the Parent
       if (e.data.type === 'SLB_FETCH_MANUAL') {
-          if (location.href.includes("www-talo-ssb-pr")) {
+          if (location.href.includes("www-talo-ssb-pr") && await ensureDisclaimerStateLoaded()) {
               if (cachedApiBaseUrl && cachedApiHeaders) {
                   // Fetch the data
-                  fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr).then(fetchResult => {
-                      if (window.parent && window.parent !== window) {
-                          window.parent.postMessage({ 
-                              type: 'SLB_DATA_FETCHED', 
-                              bets: Array.from(fetchResult.bets.values()),
-                              fromStr: fetchResult.fromStr,
-                              toStr: fetchResult.toStr
-                          }, '*');
-                      }
-                  });
+                  fetchAndPostData(e.data.queryStr);
               }
           }
       }
@@ -87,13 +91,21 @@
       if (e.data.type === 'SLB_FETCH_START') {
           if (!location.href.includes("my-bets")) return;
           showModal();
-          updateStatus("正在透過背後通道拉取 30 天內的注單資料...");
+          if (!await ensureDisclaimerStateLoaded()) {
+              showDisclaimerNotice();
+              return;
+          }
+          updateStatus("正在載入資料...");
       }
 
       // When the Parent Window receives the fetched data
       if (e.data.type === 'SLB_DATA_FETCHED') {
           if (!location.href.includes("my-bets")) return;
           showModal();
+          if (!await ensureDisclaimerStateLoaded()) {
+              showDisclaimerNotice();
+              return;
+          }
           
           if (e.data.fromStr) {
               const fromEl = document.getElementById("slb-date-from");
@@ -120,6 +132,75 @@
     } else {
         document.addEventListener("DOMContentLoaded", fn);
     }
+  }
+
+  function hasAcceptedDisclaimer() {
+    return disclaimerAcceptedInThisPage;
+  }
+
+  function getExtensionStorage() {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return null;
+      return chrome.storage.local;
+  }
+
+  function loadDisclaimerAccepted() {
+      return new Promise((resolve) => {
+          const storage = getExtensionStorage();
+          if (!storage) {
+              disclaimerStorageLoaded = true;
+              resolve(false);
+              return;
+          }
+          storage.get([DISCLAIMER_ACCEPTED_KEY], (result) => {
+              disclaimerAcceptedInThisPage = result && result[DISCLAIMER_ACCEPTED_KEY] === true;
+              disclaimerStorageLoaded = true;
+              resolve(disclaimerAcceptedInThisPage);
+          });
+      });
+  }
+
+  async function ensureDisclaimerStateLoaded() {
+      if (!disclaimerStorageLoaded) await disclaimerStorageReady;
+      return hasAcceptedDisclaimer();
+  }
+
+  function saveDisclaimerAccepted() {
+      disclaimerAcceptedInThisPage = true;
+      disclaimerStorageLoaded = true;
+      const storage = getExtensionStorage();
+      if (!storage) return Promise.resolve();
+      return new Promise((resolve) => {
+          storage.set({ [DISCLAIMER_ACCEPTED_KEY]: true }, () => resolve());
+      });
+  }
+
+  function showDisclaimerNoticeIfNeeded() {
+      ensureDisclaimerStateLoaded().then((accepted) => {
+          if (!accepted) showDisclaimerNotice();
+      });
+  }
+
+  async function fetchAndPostData(queryStr) {
+      if (!cachedApiBaseUrl || !cachedApiHeaders) return;
+      if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'SLB_FETCH_START' }, '*');
+      }
+      const fetchResult = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, queryStr);
+      if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+              type: 'SLB_DATA_FETCHED',
+              bets: Array.from(fetchResult.bets.values()),
+              fromStr: fetchResult.fromStr,
+              toStr: fetchResult.toStr
+          }, '*');
+      }
+  }
+
+  function broadcastDisclaimerAccepted() {
+      const frames = document.getElementsByTagName('iframe');
+      for (let i = 0; i < frames.length; i++) {
+          frames[i].contentWindow.postMessage({ type: 'SLB_DISCLAIMER_ACCEPTED' }, '*');
+      }
   }
 
   // 3. UI and Logic in the Main Frame
@@ -150,6 +231,28 @@
       }
       .slb-modal-title { font-size: 20px; font-weight: 700; color: #fff; margin: 0; }
       .slb-modal-subtitle { font-size: 14px; color: #9ca3af; margin-top: 4px; }
+      .slb-disclaimer-line {
+        margin-top: 8px; color: #fcd34d; font-size: 13px; line-height: 1.5;
+      }
+      .slb-disclaimer-panel {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        min-height: 100%; padding: 32px 24px; color: #e5e7eb; text-align: center;
+      }
+      .slb-disclaimer-card {
+        width: min(680px, 100%); background: #1f2937; border: 1px solid #4b5563;
+        border-radius: 8px; padding: 24px; box-shadow: 0 12px 24px rgba(0,0,0,0.3);
+      }
+      .slb-disclaimer-card h3 {
+        margin: 0 0 12px; color: #fff; font-size: 18px;
+      }
+      .slb-disclaimer-card p {
+        margin: 0 0 18px; color: #d1d5db; line-height: 1.7; font-size: 15px;
+      }
+      #slb-accept-disclaimer-btn {
+        background: #2563eb; color: #fff; border: 0; border-radius: 6px;
+        padding: 10px 16px; font-size: 15px; font-weight: 700; cursor: pointer;
+      }
+      #slb-accept-disclaimer-btn:hover { background: #1d4ed8; }
       .slb-action-btns {
         display: flex; gap: 16px; align-items: center;
       }
@@ -276,6 +379,7 @@
                     <div class="slb-modal-header">
                         <div>
                             <div class="slb-modal-title">自動統計報表</div>
+                            <div class="slb-disclaimer-line">${DISCLAIMER_TEXT}</div>
                             <div style="margin-top: 8px; font-size: 14px; color: #d1d5db; display: flex; align-items: center; gap: 8px;">
                                 📅 查詢區間：
                                 <input type="date" id="slb-date-from" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
@@ -285,7 +389,7 @@
                                 <button id="slb-date-7d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px; margin-left:4px;">7天</button>
                                 <button id="slb-date-30d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px;">30天</button>
                             </div>
-                            <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在初始化...</div>
+                            <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在載入資料...</div>
                         </div>
                         <div class="slb-action-btns">
                             <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
@@ -299,7 +403,7 @@
                     <div class="slb-modal-content" id="slb-modal-content">
                         <div class="slb-loading-container">
                             <div class="slb-spinner"></div>
-                            <div id="slb-loading-text">正在等待攔截 API...</div>
+                            <div id="slb-loading-text">正在載入資料...</div>
                         </div>
                     </div>
                 </div>
@@ -337,12 +441,20 @@
                 miniBtn.style.display = "flex";
             });
 
+            overlay.addEventListener("click", (e) => {
+                if (e.target !== overlay) return;
+                overlay.style.display = "none";
+                miniBtn.style.display = "flex";
+            });
+
             document.getElementById("slb-export-btn").addEventListener("click", exportCSV);
 
             miniBtn.addEventListener("click", () => {
                 miniBtn.style.display = "none";
                 overlay.style.display = "flex";
             });
+
+            showDisclaimerNoticeIfNeeded();
             
             // Init date inputs
             const fromEl = document.getElementById("slb-date-from");
@@ -355,7 +467,11 @@
                 toEl.value = formatD(today);
             }
 
-            document.getElementById("slb-date-search").addEventListener("click", () => {
+            document.getElementById("slb-date-search").addEventListener("click", async () => {
+                if (!await ensureDisclaimerStateLoaded()) {
+                    showDisclaimerNotice();
+                    return;
+                }
                 const fv = document.getElementById("slb-date-from").value;
                 const tv = document.getElementById("slb-date-to").value;
                 if (!fv || !tv) return;
@@ -376,6 +492,7 @@
                 }
 
                 // Send message to IFRAME to fetch
+                broadcastDisclaimerAccepted();
                 const frames = document.getElementsByTagName('iframe');
                 for (let i = 0; i < frames.length; i++) {
                     frames[i].contentWindow.postMessage({
@@ -408,8 +525,43 @@
             });
         } else {
             overlay.style.display = "flex";
+            showDisclaimerNoticeIfNeeded();
         }
     });
+  }
+
+  function showDisclaimerNotice() {
+      const overlay = document.getElementById("slb-modal-overlay");
+      const miniBtn = document.getElementById("slb-minimized-btn");
+      if (overlay) overlay.style.display = "flex";
+      if (miniBtn) miniBtn.style.display = "none";
+      const contentEl = document.getElementById("slb-modal-content");
+      if (!contentEl) return;
+      contentEl.innerHTML = `
+          <div class="slb-disclaimer-panel">
+              <div class="slb-disclaimer-card">
+                  <h3>使用前請先確認免責聲明</h3>
+                  <p>${DISCLAIMER_TEXT}</p>
+                  <button id="slb-accept-disclaimer-btn">我已了解並同意使用</button>
+              </div>
+          </div>
+      `;
+      const statusEl = document.getElementById("slb-status-text");
+      if (statusEl) statusEl.textContent = "請先確認免責聲明後再使用報表功能。";
+      const acceptBtn = document.getElementById("slb-accept-disclaimer-btn");
+      if (acceptBtn) {
+          acceptBtn.addEventListener("click", async () => {
+              await saveDisclaimerAccepted();
+              broadcastDisclaimerAccepted();
+              updateStatus("已確認免責聲明，正在載入報表...");
+              contentEl.innerHTML = `
+                  <div class="slb-loading-container">
+                      <div class="slb-spinner"></div>
+                      <div id="slb-loading-text">已確認免責聲明，正在載入報表...</div>
+                  </div>
+              `;
+          });
+      }
   }
 
   function updateStatus(text) {
