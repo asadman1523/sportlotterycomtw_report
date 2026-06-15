@@ -437,10 +437,10 @@
           const pl = settledReturn - settledBet;
           summaryEl.innerHTML = `
             <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; margin-right:8px;">
-                💰 <b>資金</b>：總投入 <b>NT$ ${totalBet}</b> <span style="color:#6b7280">|</span> 未派彩 <span style="color:#fcd34d">NT$ ${pendingStake}</span>
+                💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span style="color:#fcd34d">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
             </span>
             <span style="background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px;">
-                🏆 <b>戰績</b>：獲利 <span style="color:#34d399">NT$ ${winProfit}</span> <span style="color:#6b7280">|</span> 虧損 <span style="color:#f87171">NT$ ${lostStake}</span> <span style="color:#6b7280">|</span> 淨損益 <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>
+                🏆 <b>結算戰績</b>：總派彩 <span style="color:#34d399">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>
             </span>
           `;
       }
