@@ -167,10 +167,39 @@
         background: #1f2937;
       }
       .slb-date { font-size: 13px; color: #9ca3af; white-space: nowrap; }
-      .slb-type { font-weight: 600; color: #e5e7eb; white-space: nowrap; }
-      .slb-content { 
-        max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        color: #60a5fa; cursor: help;
+      .slb-table th, .slb-table td {
+        padding: 12px; text-align: center; border-bottom: 1px solid #374151;
+      }
+      .slb-content {
+        max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        color: #d1d5db; cursor: pointer; transition: all 0.2s;
+      }
+      .slb-content:hover {
+        color: #fff;
+      }
+      .slb-content.expanded {
+        white-space: normal;
+        max-width: 400px;
+        text-align: left;
+      }
+      .slb-content:not(.expanded) div {
+        display: inline;
+      }
+      .slb-content:not(.expanded) div:not(:last-child)::after {
+        content: " | ";
+        color: #6b7280;
+        margin: 0 4px;
+      }
+      .slb-content.expanded div {
+        display: block;
+        margin-bottom: 6px;
+        padding-bottom: 6px;
+        border-bottom: 1px dashed #4b5563;
+      }
+      .slb-content.expanded div:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
       }
       .slb-amount { font-weight: 700; white-space: nowrap; }
       .slb-amount.win { color: #34d399; }
@@ -511,7 +540,7 @@
                   const ev = escapeHTML(leg.eventName || '未知');
                   const mk = escapeHTML(leg.marketName || '');
                   const sel = escapeHTML(leg.selectionName || '');
-                  return `[${ev}] ${mk} - <b>${sel}</b>`;
+                  return `<div>[${ev}] ${mk} - <b>${sel}</b></div>`;
               });
               const plainLegTexts = b.legs.map(leg => {
                   const ev = escapeHTML(leg.eventName || '未知');
@@ -519,10 +548,10 @@
                   const sel = escapeHTML(leg.selectionName || '');
                   return `[${ev}] ${mk} - ${sel}`;
               });
-              contentText = htmlLegTexts.join(" <span style='color:#6b7280'>|</span> ");
+              contentText = htmlLegTexts.join("");
               fullContentText = plainLegTexts.join("\n");
           } else {
-              contentText = "無法讀取詳細資訊";
+              contentText = "<div>無法讀取詳細資訊</div>";
               fullContentText = "無法讀取詳細資訊";
           }
 
@@ -558,6 +587,12 @@
           `;
       }
       
+      container.querySelectorAll('.slb-content').forEach(el => {
+          el.addEventListener('click', () => {
+              el.classList.toggle('expanded');
+          });
+      });
+
       container.querySelectorAll('th[data-sort]').forEach(th => {
           th.addEventListener('click', () => {
               const col = th.getAttribute('data-sort');
