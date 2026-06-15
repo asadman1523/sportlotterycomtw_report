@@ -1,28 +1,31 @@
-# sportslottery_bet
+# 台灣運彩 30 天投注報表自動產生器 (Taiwan Sports Lottery 30-Day Report Generator)
 
-Chrome / Edge extension for Taiwan Sports Lottery my-bets.
+這是一個專為「台灣運彩」網頁版設計的 Chrome / Edge 擴充功能，能夠將原本分散、不易閱讀的歷史注單，自動轉換成一目了然的「30 天投注報表」，讓您的損益與投注紀錄清晰可見！
 
-## 功能
+## 🌟 功能特色
 
-- 不讀 API，不處理登入 session。
-- 不顯示右側彈窗或提示框。
-- 在官方「我的投注」清單裡，每張單子的最上方加入一行摘要：
+- **一鍵自動統計**：自動攔截並拉取近 30 天內所有「未派彩」與「已派彩」的注單資料。
+- **精準損益計算**：自動區分本金與獲利，精算真實的「已結算總損益」，未派彩注單絕不干擾結算數據。
+- **串關完美收納**：無論買了多少關，都會自動合併為一行顯示，滑鼠懸停即可展開檢視完整投注內容。
+- **專業級表格排版**：採用緊湊的高級表格設計 (Dark Mode)，一眼掃過即可掌握數十筆注單狀態。
+- **無縫嵌入體驗**：擁有獨立的懸浮縮小按鈕 (`_`)，不干擾原本網頁操作，隨點隨看。
 
-```text
-輸/贏 日期 - 玩法 -> 投注選項
-```
+## 🛠️ 安裝方式 (開發人員模式)
 
-- 預設只顯示摘要；點摘要可展開/收合原本完整資訊。
+1. 下載本專案檔案 (或從 Releases 下載 zip 檔並解壓縮)。
+2. 開啟瀏覽器的擴充功能管理頁面：
+   - Chrome: `chrome://extensions/`
+   - Edge: `edge://extensions/`
+3. 開啟右上角的 **「開發人員模式 (Developer mode)」**。
+4. 點擊左上角的 **「載入未封裝項目 (Load unpacked)」**。
+5. 選擇解壓縮後的資料夾。
+6. 回到運彩官方網站的 [我的投注 (My Bets)](https://member.sportslottery.com.tw/account/my-bets) 頁面，重新整理即可看到報表彈出！
 
-## 安裝
+## ⚠️ 免責聲明 (Disclaimer)
 
-1. 開啟 `chrome://extensions/` 或 `edge://extensions/`。
-2. 開啟「開發人員模式」。
-3. 選「載入未封裝項目」。
-4. 選這個資料夾：`C:\Users\Jack\Documents\sportslottery_bet`。
-5. 回到 `https://member.sportslottery.com.tw/account/my-bets` 重新整理頁面。
+1. **僅供學術研究**：本專案僅供程式語言學習、UI/UX 介面優化研究與個人資料視覺化使用。
+2. **非官方工具**：本專案與「台灣運彩」官方無任何關聯，亦未利用任何系統漏洞進行下單或篡改數據。
+3. **風險自負**：使用者安裝本擴充功能之風險由使用者自行承擔，若因使用本工具導致帳號發生任何問題，開發者概不負責。
 
-## 檔案
-
-- `manifest.json`: extension 設定。
-- `sportslottery-my-bets.user.js`: 插入投注摘要與展開/收合邏輯。
+---
+*Developed for a better sports betting UI experience.*
