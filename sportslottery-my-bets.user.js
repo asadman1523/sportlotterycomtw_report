@@ -209,7 +209,7 @@
                         </div>
                         <div class="slb-action-btns">
                             <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
-                                <input type="checkbox" id="slb-auto-open-cb" style="cursor:pointer; width:16px; height:16px;"> 預設打開
+                                <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 預設打開
                             </label>
                             <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">匯出 CSV</button>
                             <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
