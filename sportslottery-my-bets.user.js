@@ -234,7 +234,8 @@
             document.body.appendChild(miniBtn);
             
             const autoOpenCb = document.getElementById("slb-auto-open-cb");
-            const isAutoOpen = localStorage.getItem("slb_auto_open") === "true";
+            const autoOpenPref = localStorage.getItem("slb_auto_open");
+            const isAutoOpen = autoOpenPref === null ? true : autoOpenPref === "true";
             autoOpenCb.checked = isAutoOpen;
             
             autoOpenCb.addEventListener("change", (e) => {
