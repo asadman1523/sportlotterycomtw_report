@@ -211,9 +211,8 @@
                             <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
                                 <input type="checkbox" id="slb-auto-open-cb" style="cursor:pointer; width:16px; height:16px;"> 預設打開
                             </label>
-                            <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">📥 匯出 CSV</button>
+                            <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">匯出 CSV</button>
                             <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
-                            <button class="slb-btn" id="slb-close-btn" title="關閉">&times;</button>
                         </div>
                     </div>
                     <div class="slb-modal-content" id="slb-modal-content">
@@ -250,11 +249,6 @@
                 overlay.style.display = "none";
                 miniBtn.style.display = "flex";
             }
-
-            document.getElementById("slb-close-btn").addEventListener("click", () => {
-                overlay.style.display = "none";
-                miniBtn.style.display = "none";
-            });
 
             document.getElementById("slb-minimize-btn").addEventListener("click", () => {
                 overlay.style.display = "none";
@@ -329,10 +323,29 @@
   function renderBets(betsArray) {
       const container = document.getElementById("slb-modal-content");
       if (!container) return;
-      container.innerHTML = "";
 
-      const sortedBets = betsArray.sort((a, b) => {
-          return new Date(b.createdDate) - new Date(a.createdDate);
+      window.slbSortCol = window.slbSortCol || 'date';
+      if (window.slbSortDesc === undefined) window.slbSortDesc = true;
+
+      const sortedBets = [...betsArray].sort((a, b) => {
+          let valA, valB;
+          if (window.slbSortCol === 'date') {
+              valA = new Date((a.createdDate || "").replace(' ', 'T')).getTime() || 0;
+              valB = new Date((b.createdDate || "").replace(' ', 'T')).getTime() || 0;
+          } else if (window.slbSortCol === 'type') {
+              valA = a.betTypeName || "單場";
+              valB = b.betTypeName || "單場";
+          } else if (window.slbSortCol === 'stake') {
+              valA = a.totalStake || 0;
+              valB = b.totalStake || 0;
+          } else if (window.slbSortCol === 'return') {
+              valA = a.totalReturn || 0;
+              valB = b.totalReturn || 0;
+          }
+
+          if (valA < valB) return window.slbSortDesc ? 1 : -1;
+          if (valA > valB) return window.slbSortDesc ? -1 : 1;
+          return 0;
       });
 
       if (sortedBets.length === 0) {
@@ -341,6 +354,12 @@
       }
       
       window.currentSLBBets = sortedBets;
+      window.originalSLBBets = betsArray;
+
+      function getSortIcon(col) {
+          if (window.slbSortCol !== col) return '<span style="color:#6b7280; font-size:12px; margin-left:4px;">↕</span>';
+          return window.slbSortDesc ? '<span style="color:#34d399; font-size:12px; margin-left:4px;">↓</span>' : '<span style="color:#34d399; font-size:12px; margin-left:4px;">↑</span>';
+      }
 
       let totalBet = 0;
       let settledBet = 0;
@@ -353,11 +372,11 @@
           <table class="slb-table">
               <thead>
                   <tr>
-                      <th>下注時間</th>
-                      <th>玩法</th>
+                      <th data-sort="date" style="cursor:pointer; user-select:none;" title="點擊排序">下注時間 ${getSortIcon('date')}</th>
+                      <th data-sort="type" style="cursor:pointer; user-select:none;" title="點擊排序">玩法 ${getSortIcon('type')}</th>
                       <th>投注內容</th>
-                      <th>投注額</th>
-                      <th>預計/實際派彩</th>
+                      <th data-sort="stake" style="cursor:pointer; user-select:none;" title="點擊排序">投注額 ${getSortIcon('stake')}</th>
+                      <th data-sort="return" style="cursor:pointer; user-select:none;" title="點擊排序">預計/實際派彩 ${getSortIcon('return')}</th>
                       <th>狀態</th>
                   </tr>
               </thead>
@@ -444,6 +463,19 @@
             </span>
           `;
       }
+      
+      container.querySelectorAll('th[data-sort]').forEach(th => {
+          th.addEventListener('click', () => {
+              const col = th.getAttribute('data-sort');
+              if (window.slbSortCol === col) {
+                  window.slbSortDesc = !window.slbSortDesc;
+              } else {
+                  window.slbSortCol = col;
+                  window.slbSortDesc = true;
+              }
+              renderBets(window.originalSLBBets);
+          });
+      });
   }
 
   // NATIVE FETCH INSIDE IFRAME (Same-Origin, NO CORS ERRORS!)
