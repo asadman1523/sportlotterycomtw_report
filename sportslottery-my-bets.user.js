@@ -50,13 +50,15 @@
               }
               
               // Fetch the data
-              const allBets = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr);
+              const fetchResult = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr);
               
               // Send the massive data block to the parent!
               if (window.parent && window.parent !== window) {
                   window.parent.postMessage({ 
                       type: 'SLB_DATA_FETCHED', 
-                      bets: Array.from(allBets.values())
+                      bets: Array.from(fetchResult.bets.values()),
+                      fromStr: fetchResult.fromStr,
+                      toStr: fetchResult.toStr
                   }, '*');
               }
           }
@@ -67,11 +69,13 @@
           if (location.href.includes("www-talo-ssb-pr")) {
               if (cachedApiBaseUrl && cachedApiHeaders) {
                   // Fetch the data
-                  fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr).then(allBets => {
+                  fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, e.data.queryStr).then(fetchResult => {
                       if (window.parent && window.parent !== window) {
                           window.parent.postMessage({ 
                               type: 'SLB_DATA_FETCHED', 
-                              bets: Array.from(allBets.values())
+                              bets: Array.from(fetchResult.bets.values()),
+                              fromStr: fetchResult.fromStr,
+                              toStr: fetchResult.toStr
                           }, '*');
                       }
                   });
@@ -90,6 +94,16 @@
       if (e.data.type === 'SLB_DATA_FETCHED') {
           if (!location.href.includes("my-bets")) return;
           showModal();
+          
+          if (e.data.fromStr) {
+              const fromEl = document.getElementById("slb-date-from");
+              if (fromEl) fromEl.value = e.data.fromStr.split('T')[0];
+          }
+          if (e.data.toStr) {
+              const toEl = document.getElementById("slb-date-to");
+              if (toEl) toEl.value = e.data.toStr.split('T')[0];
+          }
+
           updateStatus("資料拉取完成！正在渲染報表...");
           if (e.data.error) {
               updateStatus(`<span style="color:red">API 錯誤: ${e.data.error}</span>`);
@@ -190,16 +204,27 @@
         color: #6b7280;
         margin: 0 4px;
       }
-      .slb-content.expanded div {
+      .slb-content.expanded div.slb-content-leg {
         display: block;
         margin-bottom: 6px;
         padding-bottom: 6px;
         border-bottom: 1px dashed #4b5563;
       }
-      .slb-content.expanded div:last-child {
+      .slb-content.expanded div.slb-content-leg:last-child {
         border-bottom: none;
         margin-bottom: 0;
         padding-bottom: 0;
+      }
+      .slb-content:not(.expanded) .slb-content-meta {
+        display: none !important;
+      }
+      .slb-content.expanded .slb-content-meta {
+        display: block;
+        margin-bottom: 8px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #4b5563;
+        font-size: 13px;
+        color: #9ca3af;
       }
       .slb-amount { font-weight: 700; white-space: nowrap; }
       .slb-amount.win { color: #34d399; }
@@ -256,7 +281,9 @@
                                 <input type="date" id="slb-date-from" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
                                 <span>~</span>
                                 <input type="date" id="slb-date-to" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
-                                <button id="slb-date-search" class="slb-btn" style="background:#2563eb; color:#fff; padding:2px 8px; border-radius:4px;">搜尋</button>
+                                <button id="slb-date-search" class="slb-btn" style="background:#2563eb; color:#fff; padding:2px 8px; border-radius:4px; font-size:13px;">搜尋</button>
+                                <button id="slb-date-7d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px; margin-left:4px;">7天</button>
+                                <button id="slb-date-30d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px;">30天</button>
                             </div>
                             <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在初始化...</div>
                         </div>
@@ -264,6 +291,7 @@
                             <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
                                 <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 預設打開
                             </label>
+                            <a href="https://github.com/asadman1523/sportlotterycomtw_report/issues" target="_blank" class="slb-btn" title="回報問題" style="font-size:14px; background:#4b5563; color:#fff; border-radius:6px; padding:4px 10px; text-decoration:none;">回報問題</a>
                             <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">匯出 CSV</button>
                             <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
                         </div>
@@ -356,6 +384,28 @@
                     }, '*');
                 }
             });
+
+            document.getElementById("slb-date-7d").addEventListener("click", () => {
+                const today = new Date();
+                const past = new Date(); past.setDate(today.getDate() - 7);
+                const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
+                const fromEl = document.getElementById("slb-date-from");
+                const toEl = document.getElementById("slb-date-to");
+                if(fromEl) fromEl.value = formatD(past);
+                if(toEl) toEl.value = formatD(today);
+                document.getElementById("slb-date-search").click();
+            });
+
+            document.getElementById("slb-date-30d").addEventListener("click", () => {
+                const today = new Date();
+                const past = new Date(); past.setDate(today.getDate() - 30);
+                const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
+                const fromEl = document.getElementById("slb-date-from");
+                const toEl = document.getElementById("slb-date-to");
+                if(fromEl) fromEl.value = formatD(past);
+                if(toEl) toEl.value = formatD(today);
+                document.getElementById("slb-date-search").click();
+            });
         } else {
             overlay.style.display = "flex";
         }
@@ -376,7 +426,7 @@
       }
       
       let csvContent = "\uFEFF"; // BOM for UTF-8 Excel compatibility
-      csvContent += "下注時間,玩法,投注內容,投注額,預計/實際派彩,狀態\n";
+      csvContent += "投注代碼,投注 ID,下注時間,玩法,投注內容,投注額,預計/實際派彩,狀態\n";
       
       window.currentSLBBets.forEach(b => {
           let createdDate = b.createdDate || "Invalid Date";
@@ -404,7 +454,7 @@
                stateText = "未派彩";
           }
           
-          csvContent += `${createdDate},${b.betTypeName || "單場"},${contentText},${b.totalStake},${displayReturn},${stateText}\n`;
+          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${b.betTypeName || "單場"},${contentText},${b.totalStake},${displayReturn},${stateText}\n`;
       });
       
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -535,12 +585,18 @@
 
           let contentText = "";
           let fullContentText = "";
+          
+          const metaHtml = `<div class="slb-content-meta" style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; user-select:text; cursor:auto;" onclick="event.stopPropagation();">
+              <div><b style="color:#d1d5db;">投注代碼：</b> ${escapeHTML(b.ticketId || b.id || '無')}</div>
+              <div><b style="color:#d1d5db;">投注 ID：</b> ${escapeHTML(b.id || '無')}</div>
+          </div>`;
+
           if (b.legs && b.legs.length > 0) {
               const htmlLegTexts = b.legs.map(leg => {
                   const ev = escapeHTML(leg.eventName || '未知');
                   const mk = escapeHTML(leg.marketName || '');
                   const sel = escapeHTML(leg.selectionName || '');
-                  return `<div>[${ev}] ${mk} - <b>${sel}</b></div>`;
+                  return `<div class="slb-content-leg">[${ev}] ${mk} - <b>${sel}</b></div>`;
               });
               const plainLegTexts = b.legs.map(leg => {
                   const ev = escapeHTML(leg.eventName || '未知');
@@ -548,30 +604,21 @@
                   const sel = escapeHTML(leg.selectionName || '');
                   return `[${ev}] ${mk} - ${sel}`;
               });
-              contentText = htmlLegTexts.join("");
+              contentText = metaHtml + htmlLegTexts.join("");
               fullContentText = plainLegTexts.join("\n");
           } else {
-              contentText = "<div>無法讀取詳細資訊</div>";
+              contentText = metaHtml + "<div class='slb-content-leg'>無法讀取詳細資訊</div>";
               fullContentText = "無法讀取詳細資訊";
           }
 
           tableHtml += `
-              <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onmouseover="this.style.background='#1f2937'" onmouseout="this.style.background='transparent'" onclick="const n = this.nextElementSibling; if(n && n.classList.contains('slb-row-details')){ n.style.display = n.style.display === 'none' ? 'table-row' : 'none'; }">
+              <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onmouseover="this.style.background='#1f2937'" onmouseout="this.style.background='transparent'" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
                   <td class="slb-date">${createdDate}</td>
                   <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
                   <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
                   <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
-              </tr>
-              <tr class="slb-row-details" style="display:none; background:#111827;">
-                  <td colspan="6" style="text-align:left; padding:10px 16px; font-size:13px; color:#9ca3af; border-top:none; border-bottom:1px solid #374151;">
-                      <div style="display:flex; gap:24px; align-items:center;">
-                          <div><b style="color:#d1d5db;">投注代碼：</b> <span style="user-select:all;">${escapeHTML(b.ticketId || b.id || '無')}</span></div>
-                          <div><b style="color:#d1d5db;">投注 ID：</b> <span style="user-select:all;">${escapeHTML(b.id || '無')}</span></div>
-                          <div style="margin-left:auto; font-size:12px; color:#6b7280;">點擊投注內容可展開多關明細</div>
-                      </div>
-                  </td>
               </tr>
           `;
       });
@@ -595,12 +642,6 @@
             </div>
           `;
       }
-      
-      container.querySelectorAll('.slb-content').forEach(el => {
-          el.addEventListener('click', () => {
-              el.classList.toggle('expanded');
-          });
-      });
 
       container.querySelectorAll('th[data-sort]').forEach(th => {
           th.addEventListener('click', () => {
@@ -704,13 +745,14 @@
                               const betId = item.fullExternalReference;
                               if (!localDatabase.has(betId)) {
                                   localDatabase.set(betId, {
-                                      id: betId,
+                                      id: item.idFOBet || item.id || betId,
+                                      fullExternalReference: betId,
                                       createdDate: item.tsAttempted,
                                       betTypeName: item.betTypeName,
                                       betState: item.betState,
                                       totalStake: item.totalStake || item.wunitStake || 0,
                                       totalReturn: item.betState === 'Open' ? item.potentialReturn : (item.totalReturn || item.discountedTotalReturn || 0),
-                                      ticketId: item.ticketId || item.receipt || item.externalRef || item.shortId || '',
+                                      ticketId: item.idFOBetslip || item.receipt || item.ticketId || item.externalRef || item.shortId || '',
                                       legs: []
                                   });
                               }
@@ -736,6 +778,10 @@
       await fetchState("Opened");
       await fetchState("Settled");
       
-      return localDatabase;
+      return {
+          bets: localDatabase,
+          fromStr: fromStr,
+          toStr: toStr
+      };
   }
 })();
