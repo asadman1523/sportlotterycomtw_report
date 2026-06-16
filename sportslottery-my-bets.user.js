@@ -5,6 +5,14 @@
   const betsDatabase = new Map();
   const DISCLAIMER_ACCEPTED_KEY = "slb_disclaimer_accepted_v1";
   const DISCLAIMER_TEXT = "免責聲明：本工具僅供個人記帳與參考，統計結果不代表官方帳務；所有投注紀錄、派彩與結算資訊皆以台灣運彩官方系統為準。本工具與台灣運彩官方無關。";
+  const SPORT_LABELS = {
+      FBL: "足球",
+      BKB: "籃球",
+      BSB: "棒球",
+      TNS: "網球",
+      OTHER: "其他",
+  };
+  const SPORT_FILTER_ORDER = ["FBL", "BKB", "BSB", "TNS", "OTHER"];
   let cachedApiHeaders = null;
   let cachedApiBaseUrl = null;
   let cachedApiQueryStr = null;
@@ -22,6 +30,8 @@
     bet: "\u6295\u6ce8",
     option: "\u6295\u6ce8\u9078\u9805",
   };
+
+  window.slbSelectedSportTypes = window.slbSelectedSportTypes || [];
 
   // 1. Inject Interceptor into Main World
   function injectMainWorldScript() {
@@ -203,6 +213,80 @@
       }
   }
 
+  function normalizeSportType(sportType) {
+      return SPORT_LABELS[sportType] ? sportType : "OTHER";
+  }
+
+  function getSportLabel(sportType) {
+      return SPORT_LABELS[normalizeSportType(sportType)];
+  }
+
+  function getBetSportTypes(bet) {
+      const types = new Set();
+      (bet.legs || []).forEach((leg) => {
+          types.add(normalizeSportType(leg.idFOSportType));
+      });
+      if (types.size === 0) types.add("OTHER");
+      return types;
+  }
+
+  function betMatchesSportFilter(bet) {
+      const selected = window.slbSelectedSportTypes || [];
+      if (selected.length === 0) return true;
+      const sportTypes = getBetSportTypes(bet);
+      return selected.some((sportType) => sportTypes.has(sportType));
+  }
+
+  function updateSportFilterControls() {
+      const optionsEl = document.getElementById("slb-sport-filter-options");
+      if (!optionsEl) return;
+
+      const activeSelected = new Set(window.slbSelectedSportTypes || []);
+      const allActive = activeSelected.size === 0;
+      const buttonsHtml = [
+          `<button type="button" class="slb-sport-filter-btn ${allActive ? "active" : ""}" data-sport="ALL">全部</button>`,
+          ...SPORT_FILTER_ORDER.map((sportType) =>
+              `<button type="button" class="slb-sport-filter-btn ${activeSelected.has(sportType) ? "active" : ""}" data-sport="${sportType}">${getSportLabel(sportType)}</button>`
+          ),
+      ].join("");
+
+      optionsEl.innerHTML = buttonsHtml;
+      optionsEl.querySelectorAll(".slb-sport-filter-btn").forEach((button) => {
+          button.addEventListener("click", () => {
+              const sportType = button.getAttribute("data-sport");
+              if (sportType === "ALL") {
+                  window.slbSelectedSportTypes = [];
+              } else {
+                  const nextSelected = new Set(window.slbSelectedSportTypes || []);
+                  if (nextSelected.has(sportType)) nextSelected.delete(sportType);
+                  else nextSelected.add(sportType);
+                  window.slbSelectedSportTypes = [...nextSelected];
+              }
+              if (window.originalSLBBets) renderBets(window.originalSLBBets);
+          });
+      });
+  }
+
+  async function updateGitHubStars() {
+      const starsEl = document.getElementById("slb-github-stars");
+      if (!starsEl) return;
+
+      try {
+          const response = await fetch("https://api.github.com/repos/asadman1523/sportlotterycomtw_report");
+          if (!response.ok) throw new Error(`GitHub API ${response.status}`);
+          const repo = await response.json();
+          const stars = Number(repo.stargazers_count || 0);
+          starsEl.textContent = stars.toLocaleString("en-US");
+      } catch (e) {
+          starsEl.textContent = "";
+      }
+  }
+
+  function updateResultCount(count) {
+      const countEl = document.getElementById("slb-result-count");
+      if (countEl) countEl.textContent = `共 ${count} 筆資料`;
+  }
+
   // 3. UI and Logic in the Main Frame
   function ensureStyles() {
     if (document.getElementById("slb-modal-styles")) return;
@@ -223,14 +307,36 @@
         box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); border: 1px solid #374151;
         overflow: hidden; color: #f3f4f6;
         transition: all 0.3s ease;
+        position: relative;
       }
       .slb-modal-header {
-        padding: 20px 24px; border-bottom: 1px solid #374151;
-        display: flex; justify-content: space-between; align-items: center;
+        padding: 20px 250px 20px 24px; border-bottom: 1px solid #374151;
+        display: block;
         background: #1f2937;
+        position: relative;
       }
       .slb-modal-title { font-size: 20px; font-weight: 700; color: #fff; margin: 0; }
+      .slb-title-row {
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+      }
       .slb-modal-subtitle { font-size: 14px; color: #9ca3af; margin-top: 4px; }
+      .slb-filter-row {
+        margin-top: 8px; font-size: 14px; color: #d1d5db;
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      }
+      .slb-sport-filter-options {
+        display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+      }
+      .slb-sport-filter-btn {
+        background: #374151; color: #d1d5db; border: 1px solid #4b5563;
+        padding: 3px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
+      }
+      .slb-sport-filter-btn:hover {
+        background: #4b5563; color: #fff;
+      }
+      .slb-sport-filter-btn.active {
+        background: #2563eb; border-color: #60a5fa; color: #fff;
+      }
       .slb-disclaimer-line {
         margin-top: 8px; color: #fcd34d; font-size: 13px; line-height: 1.5;
       }
@@ -253,8 +359,55 @@
         padding: 10px 16px; font-size: 15px; font-weight: 700; cursor: pointer;
       }
       #slb-accept-disclaimer-btn:hover { background: #1d4ed8; }
-      .slb-action-btns {
-        display: flex; gap: 16px; align-items: center;
+      .slb-auto-open-label {
+        color: #9ca3af; font-size: 14px; display: flex; align-items: center;
+        gap: 6px; cursor: pointer; user-select: none;
+        white-space: nowrap;
+      }
+      .slb-header-github {
+        position: absolute; top: 20px; right: 66px; z-index: 19;
+      }
+      .slb-header-export {
+        position: absolute; right: 24px; bottom: 20px; z-index: 19;
+        display: flex; align-items: center; gap: 10px;
+      }
+      .slb-result-count {
+        color: #9ca3af; font-size: 13px; white-space: nowrap;
+      }
+      .slb-github-button {
+        display: inline-flex; align-items: stretch; height: 26px;
+        color: #fff; text-decoration: none; font-size: 12px; font-weight: 700;
+        white-space: nowrap;
+        line-height: 1;
+      }
+      .slb-github-button-main,
+      .slb-github-button-count {
+        display: inline-flex; align-items: center; justify-content: center;
+        background: #0d1117; border: 1px solid #30363d;
+      }
+      .slb-github-button-main {
+        gap: 4px; padding: 0 8px; border-radius: 3px 0 0 3px;
+      }
+      .slb-github-button-count {
+        min-width: 26px; padding: 0 7px; border-left: 0;
+        border-radius: 0 3px 3px 0;
+      }
+      .slb-github-button:hover .slb-github-button-main,
+      .slb-github-button:hover .slb-github-button-count {
+        background: #161b22;
+      }
+      .slb-github-icon {
+        width: 14px; height: 14px; fill: currentColor;
+      }
+      #slb-minimize-btn {
+        position: absolute; top: 18px; right: 18px; z-index: 20;
+        width: 36px; height: 36px; border-radius: 8px;
+        background: transparent; border: 1px solid transparent; color: #9ca3af;
+        font-size: 22px; font-weight: 500; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+      }
+      #slb-minimize-btn:hover {
+        color: #fff; background: rgba(255,255,255,0.08); border-color: #4b5563;
       }
       .slb-btn {
         background: none; border: none; color: #9ca3af; font-size: 24px;
@@ -265,6 +418,11 @@
       .slb-modal-content {
         flex: 1; overflow-y: auto; background: #111827;
       }
+      .slb-export-btn {
+        background: #059669; color: #fff; border: 0; border-radius: 6px;
+        padding: 4px 10px; font-size: 13px; line-height: 20px; font-weight: 700; cursor: pointer;
+      }
+      .slb-export-btn:hover { background: #047857; }
       .slb-table {
         width: 100%; border-collapse: collapse; text-align: left;
       }
@@ -376,11 +534,17 @@
             overlay.id = "slb-modal-overlay";
             overlay.innerHTML = `
                 <div id="slb-modal-box">
+                    <button id="slb-minimize-btn" title="縮小">X</button>
                     <div class="slb-modal-header">
                         <div>
-                            <div class="slb-modal-title">自動統計報表</div>
+                            <div class="slb-title-row">
+                                <div class="slb-modal-title">自動統計報表</div>
+                                <label class="slb-auto-open-label">
+                                    <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 切到我的投注時自動打開
+                                </label>
+                            </div>
                             <div class="slb-disclaimer-line">${DISCLAIMER_TEXT}</div>
-                            <div style="margin-top: 8px; font-size: 14px; color: #d1d5db; display: flex; align-items: center; gap: 8px;">
+                            <div class="slb-filter-row">
                                 📅 查詢區間：
                                 <input type="date" id="slb-date-from" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
                                 <span>~</span>
@@ -389,15 +553,28 @@
                                 <button id="slb-date-7d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px; margin-left:4px;">7天</button>
                                 <button id="slb-date-30d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px;">30天</button>
                             </div>
+                            <div class="slb-filter-row">
+                                🏷️ 球類：
+                                <div class="slb-sport-filter-options" id="slb-sport-filter-options">
+                                    <button type="button" class="slb-sport-filter-btn active" data-sport="ALL">全部</button>
+                                </div>
+                            </div>
                             <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在載入資料...</div>
                         </div>
-                        <div class="slb-action-btns">
-                            <label style="color:#9ca3af; font-size:14px; display:flex; align-items:center; gap:6px; cursor:pointer; user-select:none; margin-right:10px;">
-                                <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 預設打開
-                            </label>
-                            <a href="https://github.com/asadman1523/sportlotterycomtw_report/issues" target="_blank" class="slb-btn" title="回報問題" style="font-size:14px; background:#4b5563; color:#fff; border-radius:6px; padding:4px 10px; text-decoration:none;">回報問題</a>
-                            <button class="slb-btn" id="slb-export-btn" title="匯出 CSV" style="font-size:16px; background:#059669; color:#fff; border-radius:6px; padding:4px 12px; font-weight:bold;">匯出 CSV</button>
-                            <button class="slb-btn" id="slb-minimize-btn" title="縮小">_</button>
+                        <div class="slb-header-github">
+                            <a class="slb-github-button" href="https://github.com/asadman1523/sportlotterycomtw_report" target="_blank" rel="noopener noreferrer" aria-label="Star asadman1523/sportlotterycomtw_report on GitHub" title="Star on GitHub">
+                                <span class="slb-github-button-main">
+                                    <svg class="slb-github-icon" viewBox="0 0 16 16" aria-hidden="true">
+                                        <path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.969.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.979a.75.75 0 0 1-1.088-.79l.72-4.193L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"></path>
+                                    </svg>
+                                    Star
+                                </span>
+                                <span class="slb-github-button-count" id="slb-github-stars">...</span>
+                            </a>
+                        </div>
+                        <div class="slb-header-export">
+                            <span class="slb-result-count" id="slb-result-count">共 0 筆資料</span>
+                            <button class="slb-export-btn" id="slb-export-btn" title="匯出 CSV">匯出 CSV</button>
                         </div>
                     </div>
                     <div class="slb-modal-content" id="slb-modal-content">
@@ -409,6 +586,7 @@
                 </div>
             `;
             document.body.appendChild(overlay);
+            updateGitHubStars();
 
             miniBtn = document.createElement("div");
             miniBtn.id = "slb-minimized-btn";
@@ -447,7 +625,8 @@
                 miniBtn.style.display = "flex";
             });
 
-            document.getElementById("slb-export-btn").addEventListener("click", exportCSV);
+            const exportBtn = document.getElementById("slb-export-btn");
+            if (exportBtn) exportBtn.addEventListener("click", exportCSV);
 
             miniBtn.addEventListener("click", () => {
                 miniBtn.style.display = "none";
@@ -623,10 +802,14 @@
       const container = document.getElementById("slb-modal-content");
       if (!container) return;
 
+      window.originalSLBBets = betsArray;
+      updateSportFilterControls();
+
       window.slbSortCol = window.slbSortCol || 'date';
       if (window.slbSortDesc === undefined) window.slbSortDesc = true;
 
-      const sortedBets = [...betsArray].sort((a, b) => {
+      const filteredBets = [...betsArray].filter(betMatchesSportFilter);
+      const sortedBets = filteredBets.sort((a, b) => {
           let valA, valB;
           if (window.slbSortCol === 'date') {
               valA = new Date((a.createdDate || "").replace(' ', 'T')).getTime() || 0;
@@ -650,13 +833,14 @@
           return 0;
       });
 
+      window.currentSLBBets = sortedBets;
+      updateResultCount(sortedBets.length);
       if (sortedBets.length === 0) {
-          container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #9ca3af;">沒有找到任何注單記錄。</div>`;
+          container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #9ca3af;">沒有符合篩選條件的注單記錄。</div>`;
+          updateStatus("目前篩選條件沒有注單記錄。");
           return;
       }
       
-      window.currentSLBBets = sortedBets;
-      window.originalSLBBets = betsArray;
 
       function getSortIcon(col) {
           if (window.slbSortCol !== col) return '<span style="color:#6b7280; font-size:12px; margin-left:4px;">↕</span>';
@@ -722,7 +906,7 @@
               const d = new Date(createdDate.replace(' ', 'T'));
               if (!isNaN(d.getTime())) {
                   createdDate = d.toLocaleString('zh-TW', {
-                      month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
                   });
               }
           }
@@ -909,6 +1093,9 @@
                                   });
                               }
                               localDatabase.get(betId).legs.push({
+                                  idFOSportType: item.idFOSportType,
+                                  idFOSport: item.idFOSport,
+                                  tournamentName: item.tournamentName,
                                   eventName: item.eventName,
                                   marketName: item.marketName,
                                   selectionName: item.selectionName
