@@ -4,6 +4,7 @@
   const SUMMARY_CLASS = "slb-bet-summary";
   const betsDatabase = new Map();
   const DISCLAIMER_ACCEPTED_KEY = "slb_disclaimer_accepted_v1";
+  const THEME_STORAGE_KEY = "slb_theme";
   const DISCLAIMER_TEXT = "免責聲明：本工具僅供個人記帳與參考，統計結果不代表官方帳務；所有投注紀錄、派彩與結算資訊皆以台灣運彩官方系統為準。本工具與台灣運彩官方無關。";
   const SPORT_LABELS = {
       FBL: "足球",
@@ -128,7 +129,7 @@
 
           updateStatus("資料拉取完成！正在渲染報表...");
           if (e.data.error) {
-              updateStatus(`<span style="color:red">API 錯誤: ${e.data.error}</span>`);
+              updateStatus(`<span class="slb-error-text">API 錯誤: ${e.data.error}</span>`);
           } else {
               renderBets(e.data.bets);
           }
@@ -287,80 +288,164 @@
       if (countEl) countEl.textContent = `共 ${count} 筆資料`;
   }
 
+  function getPreferredTheme() {
+      try {
+          return localStorage.getItem(THEME_STORAGE_KEY) === "light" ? "light" : "dark";
+      } catch (e) {
+          return "dark";
+      }
+  }
+
+  function applyTheme(theme) {
+      const nextTheme = theme === "light" ? "light" : "dark";
+      const overlay = document.getElementById("slb-modal-overlay");
+      const miniBtn = document.getElementById("slb-minimized-btn");
+      const themeSwitch = document.getElementById("slb-theme-switch");
+
+      if (overlay) overlay.dataset.theme = nextTheme;
+      if (miniBtn) miniBtn.dataset.theme = nextTheme;
+      if (themeSwitch) {
+          const isLight = nextTheme === "light";
+          themeSwitch.classList.toggle("light", isLight);
+          themeSwitch.setAttribute("aria-checked", isLight ? "true" : "false");
+          themeSwitch.title = isLight ? "切換深色模式" : "切換淺色模式";
+      }
+
+      try {
+          localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+      } catch (e) {}
+  }
+
   // 3. UI and Logic in the Main Frame
   function ensureStyles() {
     if (document.getElementById("slb-modal-styles")) return;
     const style = document.createElement("style");
     style.id = "slb-modal-styles";
     style.textContent = `
+      #slb-modal-overlay,
+      #slb-minimized-btn {
+        --slb-overlay: rgba(8,20,40,0.86);
+        --slb-bg: #0f172a;
+        --slb-surface: #172033;
+        --slb-surface-alt: #1e2a44;
+        --slb-hover: #263857;
+        --slb-border: #334155;
+        --slb-border-strong: #475569;
+        --slb-text: #f4f7fa;
+        --slb-text-secondary: #d6e1ee;
+        --slb-text-muted: #aebbd0;
+        --slb-separator: #71809a;
+        --slb-primary: #2f80ed;
+        --slb-primary-hover: #1c64d1;
+        --slb-primary-soft: rgba(47, 128, 237, 0.18);
+        --slb-success: #21c07a;
+        --slb-success-hover: #179862;
+        --slb-success-soft: rgba(33, 192, 122, 0.18);
+        --slb-warning: #f4b740;
+        --slb-warning-soft: rgba(244, 183, 64, 0.18);
+        --slb-danger: #f05252;
+        --slb-danger-soft: rgba(240, 82, 82, 0.18);
+        --slb-chip-bg: rgba(96, 165, 250, 0.1);
+        --slb-shadow: 0 25px 50px -12px rgba(8,20,40,0.58);
+        --slb-card-shadow: 0 12px 24px rgba(8,20,40,0.34);
+        color-scheme: dark;
+      }
+      #slb-modal-overlay[data-theme="light"],
+      #slb-minimized-btn[data-theme="light"] {
+        --slb-overlay: rgba(24,32,42,0.38);
+        --slb-bg: #f7f8fa;
+        --slb-surface: #ffffff;
+        --slb-surface-alt: #eef1f4;
+        --slb-hover: #e4e9ee;
+        --slb-border: #d7dde3;
+        --slb-border-strong: #bdc7d1;
+        --slb-text: #18202a;
+        --slb-text-secondary: #344251;
+        --slb-text-muted: #64717f;
+        --slb-separator: #9aa6b2;
+        --slb-primary: #2563eb;
+        --slb-primary-hover: #1d4ed8;
+        --slb-primary-soft: rgba(37, 99, 235, 0.12);
+        --slb-success: #07875a;
+        --slb-success-hover: #066b49;
+        --slb-success-soft: rgba(7, 135, 90, 0.12);
+        --slb-warning: #b7791f;
+        --slb-warning-soft: rgba(183, 121, 31, 0.14);
+        --slb-danger: #dc2626;
+        --slb-danger-soft: rgba(220, 38, 38, 0.12);
+        --slb-chip-bg: rgba(24,32,42,0.06);
+        --slb-shadow: 0 25px 50px -12px rgba(24,32,42,0.28);
+        --slb-card-shadow: 0 12px 24px rgba(24,32,42,0.12);
+        color-scheme: light;
+      }
       #slb-modal-overlay {
         position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        background: rgba(0,0,0,0.85); z-index: 999999999;
+        background: var(--slb-overlay); z-index: 999999999;
         display: flex; justify-content: center; align-items: center;
         backdrop-filter: blur(5px);
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         transition: opacity 0.3s ease;
       }
       #slb-modal-box {
-        background: #111827; width: 90vw; max-width: 1400px; height: 90vh;
+        background: var(--slb-bg); width: 90vw; max-width: 1400px; height: 90vh;
         border-radius: 16px; display: flex; flex-direction: column;
-        box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); border: 1px solid #374151;
-        overflow: hidden; color: #f3f4f6;
+        box-shadow: var(--slb-shadow); border: 1px solid var(--slb-border);
+        overflow: hidden; color: var(--slb-text);
         transition: all 0.3s ease;
         position: relative;
       }
       .slb-modal-header {
-        padding: 20px 250px 20px 24px; border-bottom: 1px solid #374151;
+        padding: 20px 250px 20px 24px; border-bottom: 1px solid var(--slb-border);
         display: block;
-        background: #1f2937;
+        background: var(--slb-surface);
         position: relative;
       }
-      .slb-modal-title { font-size: 20px; font-weight: 700; color: #fff; margin: 0; }
+      .slb-modal-title { font-size: 20px; font-weight: 700; color: var(--slb-text); margin: 0; }
       .slb-title-row {
         display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
       }
-      .slb-modal-subtitle { font-size: 14px; color: #9ca3af; margin-top: 4px; }
+      .slb-modal-subtitle { font-size: 14px; color: var(--slb-text-muted); margin-top: 4px; }
       .slb-filter-row {
-        margin-top: 8px; font-size: 14px; color: #d1d5db;
+        margin-top: 8px; font-size: 14px; color: var(--slb-text-secondary);
         display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
       }
       .slb-sport-filter-options {
         display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       }
       .slb-sport-filter-btn {
-        background: #374151; color: #d1d5db; border: 1px solid #4b5563;
+        background: var(--slb-surface-alt); color: var(--slb-text-secondary); border: 1px solid var(--slb-border-strong);
         padding: 3px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
       }
       .slb-sport-filter-btn:hover {
-        background: #4b5563; color: #fff;
+        background: var(--slb-hover); color: var(--slb-text);
       }
       .slb-sport-filter-btn.active {
-        background: #2563eb; border-color: #60a5fa; color: #fff;
+        background: var(--slb-primary); border-color: var(--slb-primary); color: #fff;
       }
       .slb-disclaimer-line {
-        margin-top: 8px; color: #fcd34d; font-size: 13px; line-height: 1.5;
+        margin-top: 8px; color: var(--slb-warning); font-size: 13px; line-height: 1.5;
       }
       .slb-disclaimer-panel {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        min-height: 100%; padding: 32px 24px; color: #e5e7eb; text-align: center;
+        min-height: 100%; padding: 32px 24px; color: var(--slb-text); text-align: center;
       }
       .slb-disclaimer-card {
-        width: min(680px, 100%); background: #1f2937; border: 1px solid #4b5563;
-        border-radius: 8px; padding: 24px; box-shadow: 0 12px 24px rgba(0,0,0,0.3);
+        width: min(680px, 100%); background: var(--slb-surface); border: 1px solid var(--slb-border-strong);
+        border-radius: 8px; padding: 24px; box-shadow: var(--slb-card-shadow);
       }
       .slb-disclaimer-card h3 {
-        margin: 0 0 12px; color: #fff; font-size: 18px;
+        margin: 0 0 12px; color: var(--slb-text); font-size: 18px;
       }
       .slb-disclaimer-card p {
-        margin: 0 0 18px; color: #d1d5db; line-height: 1.7; font-size: 15px;
+        margin: 0 0 18px; color: var(--slb-text-secondary); line-height: 1.7; font-size: 15px;
       }
       #slb-accept-disclaimer-btn {
-        background: #2563eb; color: #fff; border: 0; border-radius: 6px;
+        background: var(--slb-primary); color: #fff; border: 0; border-radius: 6px;
         padding: 10px 16px; font-size: 15px; font-weight: 700; cursor: pointer;
       }
-      #slb-accept-disclaimer-btn:hover { background: #1d4ed8; }
+      #slb-accept-disclaimer-btn:hover { background: var(--slb-primary-hover); }
       .slb-auto-open-label {
-        color: #9ca3af; font-size: 14px; display: flex; align-items: center;
+        color: var(--slb-text-muted); font-size: 14px; display: flex; align-items: center;
         gap: 6px; cursor: pointer; user-select: none;
         white-space: nowrap;
       }
@@ -372,18 +457,84 @@
         display: flex; align-items: center; gap: 10px;
       }
       .slb-result-count {
-        color: #9ca3af; font-size: 13px; white-space: nowrap;
+        color: var(--slb-text-muted); font-size: 13px; white-space: nowrap;
+      }
+      .slb-sort-icon-muted { color: var(--slb-separator); font-size: 12px; margin-left: 4px; }
+      .slb-sort-icon-active { color: var(--slb-success); font-size: 12px; margin-left: 4px; }
+      .slb-meta-label { color: var(--slb-text-secondary); }
+      .slb-summary-chip {
+        display: inline-block; background: var(--slb-chip-bg);
+        padding: 4px 8px; border-radius: 4px;
+      }
+      .slb-summary-warning { color: var(--slb-warning); }
+      .slb-summary-success { color: var(--slb-success); }
+      .slb-summary-danger { color: var(--slb-danger); }
+      .slb-error-text { color: var(--slb-danger); }
+      .slb-empty-state {
+        grid-column: 1/-1; text-align: center; padding: 40px; color: var(--slb-text-muted);
+      }
+      .slb-date-shortcut {
+        background: var(--slb-surface-alt); color: var(--slb-text-secondary);
+        border: 1px solid var(--slb-border-strong); border-radius: 6px;
+        height: 28px; padding: 0 9px; font-size: 13px; line-height: 26px;
+        font-weight: 600; cursor: pointer;
+      }
+      .slb-date-shortcut:hover {
+        background: var(--slb-hover); color: var(--slb-text);
+      }
+      .slb-theme-control {
+        display: inline-flex; align-items: center; gap: 8px;
+        color: var(--slb-text-muted); font-size: 14px; white-space: nowrap;
+      }
+      .slb-theme-label { color: var(--slb-text-muted); font-size: 14px; }
+      .slb-theme-switch {
+        position: relative; width: 108px; height: 30px; padding: 0 4px;
+        display: grid; grid-template-columns: 1fr 1fr; align-items: center;
+        border: 1px solid var(--slb-border-strong); border-radius: 9999px;
+        background: var(--slb-surface-alt); color: var(--slb-text-muted);
+        font-size: 14px; font-weight: 600; line-height: 1; cursor: pointer;
+        overflow: hidden; transition: background 0.2s ease, border-color 0.2s ease;
+      }
+      .slb-theme-switch::before {
+        content: ""; position: absolute; top: 3px; left: 3px;
+        width: 50px; height: 22px; border-radius: 9999px;
+        background: var(--slb-primary); box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+        transition: transform 0.24s ease;
+      }
+      .slb-theme-switch.light::before { transform: translateX(52px); }
+      .slb-theme-switch:hover { border-color: var(--slb-primary); }
+      .slb-theme-switch span {
+        position: relative; z-index: 1; text-align: center; transition: color 0.2s ease;
+      }
+      .slb-theme-switch:not(.light) .slb-theme-dark-label,
+      .slb-theme-switch.light .slb-theme-light-label {
+        color: #fff;
+      }
+      .slb-date-input {
+        background: var(--slb-surface-alt); color: var(--slb-text);
+        border: 1px solid var(--slb-border-strong); border-radius: 6px;
+        height: 28px; padding: 0 8px; font-size: 13px;
+      }
+      .slb-date-search-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        background: var(--slb-primary); color: #fff; border: 1px solid var(--slb-primary);
+        border-radius: 6px; height: 28px; padding: 0 12px;
+        font-size: 13px; line-height: 26px; font-weight: 700; cursor: pointer;
+        transition: background 0.2s ease, border-color 0.2s ease;
+      }
+      .slb-date-search-btn:hover {
+        background: var(--slb-primary-hover); border-color: var(--slb-primary-hover); color: #fff;
       }
       .slb-github-button {
         display: inline-flex; align-items: stretch; height: 26px;
-        color: #fff; text-decoration: none; font-size: 12px; font-weight: 700;
+        color: var(--slb-text); text-decoration: none; font-size: 12px; font-weight: 700;
         white-space: nowrap;
         line-height: 1;
       }
       .slb-github-button-main,
       .slb-github-button-count {
         display: inline-flex; align-items: center; justify-content: center;
-        background: #0d1117; border: 1px solid #30363d;
+        background: var(--slb-surface-alt); border: 1px solid var(--slb-border-strong);
       }
       .slb-github-button-main {
         gap: 4px; padding: 0 8px; border-radius: 3px 0 0 3px;
@@ -394,7 +545,7 @@
       }
       .slb-github-button:hover .slb-github-button-main,
       .slb-github-button:hover .slb-github-button-count {
-        background: #161b22;
+        background: var(--slb-hover);
       }
       .slb-github-icon {
         width: 14px; height: 14px; fill: currentColor;
@@ -402,55 +553,55 @@
       #slb-minimize-btn {
         position: absolute; top: 18px; right: 18px; z-index: 20;
         width: 36px; height: 36px; border-radius: 8px;
-        background: transparent; border: 1px solid transparent; color: #9ca3af;
+        background: transparent; border: 1px solid transparent; color: var(--slb-text-muted);
         font-size: 22px; font-weight: 500; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
       }
       #slb-minimize-btn:hover {
-        color: #fff; background: rgba(255,255,255,0.08); border-color: #4b5563;
+        color: var(--slb-text); background: var(--slb-chip-bg); border-color: var(--slb-border-strong);
       }
       .slb-btn {
-        background: none; border: none; color: #9ca3af; font-size: 24px;
+        background: none; border: none; color: var(--slb-text-muted); font-size: 24px;
         cursor: pointer; transition: color 0.2s, transform 0.2s; padding: 0 4px;
         line-height: 1; display: flex; align-items: center; justify-content: center;
       }
-      .slb-btn:hover { color: #fff; transform: scale(1.1); }
+      .slb-btn:hover { color: var(--slb-text); transform: scale(1.1); }
       .slb-modal-content {
-        flex: 1; overflow-y: auto; background: #111827;
+        flex: 1; overflow-y: auto; background: var(--slb-bg);
       }
       .slb-export-btn {
-        background: #059669; color: #fff; border: 0; border-radius: 6px;
+        background: var(--slb-success); color: #fff; border: 0; border-radius: 6px;
         padding: 4px 10px; font-size: 13px; line-height: 20px; font-weight: 700; cursor: pointer;
       }
-      .slb-export-btn:hover { background: #047857; }
+      .slb-export-btn:hover { background: var(--slb-success-hover); }
       .slb-table {
         width: 100%; border-collapse: collapse; text-align: left;
       }
       .slb-table th {
-        background: #1f2937; color: #9ca3af; padding: 12px 16px;
-        font-weight: 600; font-size: 13px; border-bottom: 1px solid #374151;
+        background: var(--slb-surface); color: var(--slb-text-muted); padding: 12px 16px;
+        font-weight: 600; font-size: 13px; border-bottom: 1px solid var(--slb-border);
         position: sticky; top: 0; z-index: 10;
       }
       .slb-table td {
-        padding: 12px 16px; border-bottom: 1px solid #374151;
-        font-size: 14px; color: #e5e7eb; vertical-align: middle;
+        padding: 12px 16px; border-bottom: 1px solid var(--slb-border);
+        font-size: 14px; color: var(--slb-text); vertical-align: middle;
       }
       .slb-row {
-        background: #111827; transition: background 0.2s;
+        background: var(--slb-bg); transition: background 0.2s;
       }
       .slb-row:hover {
-        background: #1f2937;
+        background: var(--slb-hover);
       }
-      .slb-date { font-size: 13px; color: #9ca3af; white-space: nowrap; }
+      .slb-date { font-size: 13px; color: var(--slb-text-muted); white-space: nowrap; }
       .slb-table th, .slb-table td {
-        padding: 12px; text-align: center; border-bottom: 1px solid #374151;
+        padding: 12px; text-align: center; border-bottom: 1px solid var(--slb-border);
       }
       .slb-content {
         max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        color: #d1d5db; cursor: pointer; transition: all 0.2s;
+        color: var(--slb-text-secondary); cursor: pointer; transition: all 0.2s;
       }
       .slb-content:hover {
-        color: #fff;
+        color: var(--slb-text);
       }
       .slb-content.expanded {
         white-space: normal;
@@ -462,14 +613,14 @@
       }
       .slb-content:not(.expanded) div:not(:last-child)::after {
         content: " | ";
-        color: #6b7280;
+        color: var(--slb-separator);
         margin: 0 4px;
       }
       .slb-content.expanded div.slb-content-leg {
         display: block;
         margin-bottom: 6px;
         padding-bottom: 6px;
-        border-bottom: 1px dashed #4b5563;
+        border-bottom: 1px dashed var(--slb-border-strong);
       }
       .slb-content.expanded div.slb-content-leg:last-child {
         border-bottom: none;
@@ -483,28 +634,28 @@
         display: block;
         margin-bottom: 8px;
         padding-bottom: 8px;
-        border-bottom: 1px solid #4b5563;
+        border-bottom: 1px solid var(--slb-border-strong);
         font-size: 13px;
-        color: #9ca3af;
+        color: var(--slb-text-muted);
       }
       .slb-amount { font-weight: 700; white-space: nowrap; }
-      .slb-amount.win { color: #34d399; }
+      .slb-amount.win { color: var(--slb-success); }
       
       .slb-badge {
         padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600;
         white-space: nowrap; display: inline-block; text-align: center;
       }
-      .slb-badge-pending { background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
-      .slb-badge-win { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-      .slb-badge-lose { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+      .slb-badge-pending { background: var(--slb-warning-soft); color: var(--slb-warning); border: 1px solid var(--slb-warning); }
+      .slb-badge-win { background: var(--slb-success-soft); color: var(--slb-success); border: 1px solid var(--slb-success); }
+      .slb-badge-lose { background: var(--slb-danger-soft); color: var(--slb-danger); border: 1px solid var(--slb-danger); }
       
       .slb-loading-container {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        height: 100%; width: 100%; color: #60a5fa; grid-column: 1/-1;
+        height: 100%; width: 100%; color: var(--slb-primary); grid-column: 1/-1;
       }
       .slb-spinner {
-        width: 48px; height: 48px; border: 4px solid rgba(96, 165, 250, 0.2);
-        border-top-color: #60a5fa; border-radius: 50%;
+        width: 48px; height: 48px; border: 4px solid var(--slb-primary-soft);
+        border-top-color: var(--slb-primary); border-radius: 50%;
         animation: slb-spin 1s linear infinite; margin-bottom: 16px;
       }
       @keyframes slb-spin { to { transform: rotate(360deg); } }
@@ -512,13 +663,13 @@
       /* Minimized Floating Button */
       #slb-minimized-btn {
         position: fixed; bottom: 20px; right: 20px; z-index: 999999999;
-        background: #111827; border: 1px solid #374151; border-radius: 9999px;
-        padding: 12px 24px; color: #fff; font-weight: 600; cursor: pointer;
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+        background: var(--slb-surface); border: 1px solid var(--slb-border); border-radius: 9999px;
+        padding: 12px 24px; color: var(--slb-text); font-weight: 600; cursor: pointer;
+        box-shadow: var(--slb-shadow);
         display: flex; align-items: center; gap: 8px; transition: transform 0.2s;
       }
       #slb-minimized-btn:hover { transform: scale(1.05); }
-      #slb-minimized-btn svg { width: 20px; height: 20px; color: #60a5fa; }
+      #slb-minimized-btn svg { width: 20px; height: 20px; color: var(--slb-primary); }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -542,16 +693,23 @@
                                 <label class="slb-auto-open-label">
                                     <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 切到我的投注時自動打開
                                 </label>
+                                <span class="slb-theme-control" aria-label="主題">
+                                    <span class="slb-theme-label">主題</span>
+                                    <button type="button" id="slb-theme-switch" class="slb-theme-switch" role="switch" aria-checked="false" title="切換淺色模式">
+                                        <span class="slb-theme-dark-label">深色</span>
+                                        <span class="slb-theme-light-label">淺色</span>
+                                    </button>
+                                </span>
                             </div>
                             <div class="slb-disclaimer-line">${DISCLAIMER_TEXT}</div>
                             <div class="slb-filter-row">
                                 📅 查詢區間：
-                                <input type="date" id="slb-date-from" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
+                                <input type="date" id="slb-date-from" class="slb-date-input">
                                 <span>~</span>
-                                <input type="date" id="slb-date-to" style="background:#374151; color:#fff; border:1px solid #4b5563; border-radius:4px; padding:2px 4px; color-scheme: dark;">
-                                <button id="slb-date-search" class="slb-btn" style="background:#2563eb; color:#fff; padding:2px 8px; border-radius:4px; font-size:13px;">搜尋</button>
-                                <button id="slb-date-7d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px; margin-left:4px;">7天</button>
-                                <button id="slb-date-30d" class="slb-btn" style="background:#374151; color:#d1d5db; border:1px solid #4b5563; padding:2px 6px; border-radius:4px; font-size:13px;">30天</button>
+                                <input type="date" id="slb-date-to" class="slb-date-input">
+                                <button id="slb-date-search" class="slb-date-search-btn">搜尋</button>
+                                <button id="slb-date-7d" class="slb-date-shortcut" style="margin-left:4px;">7天</button>
+                                <button id="slb-date-30d" class="slb-date-shortcut">30天</button>
                             </div>
                             <div class="slb-filter-row">
                                 🏷️ 球類：
@@ -595,6 +753,7 @@
                 台灣運彩投注報表
             `;
             document.body.appendChild(miniBtn);
+            applyTheme(getPreferredTheme());
             
             const autoOpenCb = document.getElementById("slb-auto-open-cb");
             const autoOpenPref = localStorage.getItem("slb_auto_open");
@@ -604,6 +763,14 @@
             autoOpenCb.addEventListener("change", (e) => {
                 localStorage.setItem("slb_auto_open", e.target.checked ? "true" : "false");
             });
+
+            const themeSwitch = document.getElementById("slb-theme-switch");
+            if (themeSwitch) {
+                themeSwitch.addEventListener("click", () => {
+                    const currentTheme = document.getElementById("slb-modal-overlay")?.dataset.theme || getPreferredTheme();
+                    applyTheme(currentTheme === "light" ? "dark" : "light");
+                });
+            }
             
             // 根據設定決定預設狀態
             if (isAutoOpen) {
@@ -703,6 +870,7 @@
                 document.getElementById("slb-date-search").click();
             });
         } else {
+            applyTheme(getPreferredTheme());
             overlay.style.display = "flex";
             showDisclaimerNoticeIfNeeded();
         }
@@ -836,15 +1004,15 @@
       window.currentSLBBets = sortedBets;
       updateResultCount(sortedBets.length);
       if (sortedBets.length === 0) {
-          container.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #9ca3af;">沒有符合篩選條件的注單記錄。</div>`;
+          container.innerHTML = `<div class="slb-empty-state">沒有符合篩選條件的注單記錄。</div>`;
           updateStatus("目前篩選條件沒有注單記錄。");
           return;
       }
       
 
       function getSortIcon(col) {
-          if (window.slbSortCol !== col) return '<span style="color:#6b7280; font-size:12px; margin-left:4px;">↕</span>';
-          return window.slbSortDesc ? '<span style="color:#34d399; font-size:12px; margin-left:4px;">↓</span>' : '<span style="color:#34d399; font-size:12px; margin-left:4px;">↑</span>';
+          if (window.slbSortCol !== col) return '<span class="slb-sort-icon-muted">↕</span>';
+          return window.slbSortDesc ? '<span class="slb-sort-icon-active">↓</span>' : '<span class="slb-sort-icon-active">↑</span>';
       }
 
       let totalBet = 0;
@@ -923,8 +1091,8 @@
           let fullContentText = "";
           
           const metaHtml = `<div class="slb-content-meta" style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; user-select:text; cursor:auto;" onclick="event.stopPropagation();">
-              <div><b style="color:#d1d5db;">投注代碼：</b> ${escapeHTML(b.ticketId || b.id || '無')}</div>
-              <div><b style="color:#d1d5db;">投注 ID：</b> ${escapeHTML(b.id || '無')}</div>
+              <div><b class="slb-meta-label">投注代碼：</b> ${escapeHTML(b.ticketId || b.id || '無')}</div>
+              <div><b class="slb-meta-label">投注 ID：</b> ${escapeHTML(b.id || '無')}</div>
           </div>`;
 
           if (b.legs && b.legs.length > 0) {
@@ -948,7 +1116,7 @@
           }
 
           tableHtml += `
-              <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onmouseover="this.style.background='#1f2937'" onmouseout="this.style.background='transparent'" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
+              <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
                   <td class="slb-date">${createdDate}</td>
                   <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
                   <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
@@ -967,13 +1135,13 @@
           const pl = settledReturn - settledBet;
           summaryEl.innerHTML = `
             <div style="margin-bottom:6px;">
-                <span style="display:inline-block; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; margin-right:8px;">
-                    💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span style="color:#fcd34d">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
+                <span class="slb-summary-chip" style="margin-right:8px;">
+                    💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span class="slb-summary-warning">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
                 </span>
             </div>
             <div>
-                <span style="display:inline-block; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px;">
-                    🏆 <b>結算戰績</b>：總派彩 <span style="color:#34d399">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b style="color:${pl >= 0 ? '#34d399' : '#f87171'}">NT$ ${pl}</b>
+                <span class="slb-summary-chip">
+                    🏆 <b>結算戰績</b>：總派彩 <span class="slb-summary-success">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b class="${pl >= 0 ? 'slb-summary-success' : 'slb-summary-danger'}">NT$ ${pl}</b>
                 </span>
             </div>
           `;
