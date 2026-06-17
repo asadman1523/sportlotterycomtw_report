@@ -5,6 +5,7 @@
   const betsDatabase = new Map();
   const DISCLAIMER_ACCEPTED_KEY = "slb_disclaimer_accepted_v1";
   const THEME_STORAGE_KEY = "slb_theme";
+  const REPORT_PANEL_COLLAPSED_KEY = "slb_report_panel_collapsed";
   const DISCLAIMER_TEXT = "免責聲明：本工具僅供個人記帳與參考，統計結果不代表官方帳務；所有投注紀錄、派彩與結算資訊皆以台灣運彩官方系統為準。本工具與台灣運彩官方無關。";
   const SPORT_LABELS = {
       FBL: "足球",
@@ -14,6 +15,11 @@
       OTHER: "其他",
   };
   const SPORT_FILTER_ORDER = ["FBL", "BKB", "BSB", "TNS", "OTHER"];
+  const PAYOUT_FILTERS = {
+      SETTLED: "已派彩",
+      PENDING: "未派彩",
+  };
+  const SETTLED_BET_STATES = ["Settled", "CashedOut", "Closed", "Won", "Lost", "Void", "Cancelled"];
   let cachedApiHeaders = null;
   let cachedApiBaseUrl = null;
   let cachedApiQueryStr = null;
@@ -33,6 +39,7 @@
   };
 
   window.slbSelectedSportTypes = window.slbSelectedSportTypes || [];
+  window.slbSelectedPayoutStatuses = window.slbSelectedPayoutStatuses || [];
 
   // 1. Inject Interceptor into Main World
   function injectMainWorldScript() {
@@ -238,6 +245,29 @@
       return selected.some((sportType) => sportTypes.has(sportType));
   }
 
+  function isSettledBet(bet) {
+      return SETTLED_BET_STATES.includes(bet.betState);
+  }
+
+  function getPayoutStatus(bet) {
+      return isSettledBet(bet) ? "SETTLED" : "PENDING";
+  }
+
+  function betMatchesPayoutFilter(bet) {
+      const selected = window.slbSelectedPayoutStatuses || [];
+      if (selected.length === 0) return true;
+      return selected.includes(getPayoutStatus(bet));
+  }
+
+  function getBetOddsValue(bet) {
+      const odds = Number(bet.odds ?? bet.totalMultiBetOdds);
+      return Number.isFinite(odds) && odds > 0 ? odds : null;
+  }
+
+  function formatOdds(odds) {
+      return odds === null ? "-" : odds.toFixed(2);
+  }
+
   function updateSportFilterControls() {
       const optionsEl = document.getElementById("slb-sport-filter-options");
       if (!optionsEl) return;
@@ -262,6 +292,34 @@
                   if (nextSelected.has(sportType)) nextSelected.delete(sportType);
                   else nextSelected.add(sportType);
                   window.slbSelectedSportTypes = [...nextSelected];
+              }
+              if (window.originalSLBBets) renderBets(window.originalSLBBets);
+          });
+      });
+  }
+
+  function updatePayoutFilterControls() {
+      const optionsEl = document.getElementById("slb-payout-filter-options");
+      if (!optionsEl) return;
+
+      const activeSelected = new Set(window.slbSelectedPayoutStatuses || []);
+      const allActive = activeSelected.size === 0;
+      const buttonsHtml = [
+          `<button type="button" class="slb-sport-filter-btn ${allActive ? "active" : ""}" data-payout="ALL">全部</button>`,
+          ...Object.entries(PAYOUT_FILTERS).map(([status, label]) =>
+              `<button type="button" class="slb-sport-filter-btn ${activeSelected.has(status) ? "active" : ""}" data-payout="${status}">${label}</button>`
+          ),
+      ].join("");
+
+      optionsEl.innerHTML = buttonsHtml;
+      optionsEl.querySelectorAll(".slb-sport-filter-btn").forEach((button) => {
+          button.addEventListener("click", () => {
+              const status = button.getAttribute("data-payout");
+              if (status === "ALL") {
+                  window.slbSelectedPayoutStatuses = [];
+              } else {
+                  const currentSelected = window.slbSelectedPayoutStatuses || [];
+                  window.slbSelectedPayoutStatuses = currentSelected.length === 1 && currentSelected[0] === status ? [] : [status];
               }
               if (window.originalSLBBets) renderBets(window.originalSLBBets);
           });
@@ -404,10 +462,27 @@
       .slb-title-row {
         display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
       }
+      .slb-report-toggle {
+        display: inline-flex; align-items: center; gap: 6px;
+        color: var(--slb-text-secondary); font-size: 14px; font-weight: 700;
+        cursor: pointer; user-select: none;
+      }
+      .slb-report-toggle:hover {
+        color: var(--slb-text);
+      }
+      .slb-report-panel {
+        margin-top: 8px;
+      }
+      .slb-report-panel.collapsed {
+        display: none;
+      }
       .slb-modal-subtitle { font-size: 14px; color: var(--slb-text-muted); margin-top: 4px; }
       .slb-filter-row {
         margin-top: 8px; font-size: 14px; color: var(--slb-text-secondary);
         display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      }
+      .slb-filter-inline-label {
+        display: inline-flex; align-items: center; margin-left: 12px;
       }
       .slb-sport-filter-options {
         display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
@@ -466,6 +541,9 @@
         display: inline-block; background: var(--slb-chip-bg);
         padding: 4px 8px; border-radius: 4px;
       }
+      .slb-summary-row {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      }
       .slb-summary-warning { color: var(--slb-warning); }
       .slb-summary-success { color: var(--slb-success); }
       .slb-summary-danger { color: var(--slb-danger); }
@@ -486,7 +564,6 @@
         display: inline-flex; align-items: center; gap: 8px;
         color: var(--slb-text-muted); font-size: 14px; white-space: nowrap;
       }
-      .slb-theme-label { color: var(--slb-text-muted); font-size: 14px; }
       .slb-theme-switch {
         position: relative; width: 108px; height: 30px; padding: 0 4px;
         display: grid; grid-template-columns: 1fr 1fr; align-items: center;
@@ -694,30 +771,38 @@
                                     <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 切到我的投注時自動打開
                                 </label>
                                 <span class="slb-theme-control" aria-label="主題">
-                                    <span class="slb-theme-label">主題</span>
                                     <button type="button" id="slb-theme-switch" class="slb-theme-switch" role="switch" aria-checked="false" title="切換淺色模式">
                                         <span class="slb-theme-dark-label">深色</span>
                                         <span class="slb-theme-light-label">淺色</span>
                                     </button>
                                 </span>
+                                <div id="slb-report-toggle" class="slb-report-toggle" role="button" tabindex="0" aria-expanded="true" title="收合查詢、篩選與統計">摺疊▼</div>
                             </div>
                             <div class="slb-disclaimer-line">${DISCLAIMER_TEXT}</div>
-                            <div class="slb-filter-row">
-                                📅 查詢區間：
-                                <input type="date" id="slb-date-from" class="slb-date-input">
-                                <span>~</span>
-                                <input type="date" id="slb-date-to" class="slb-date-input">
-                                <button id="slb-date-search" class="slb-date-search-btn">搜尋</button>
-                                <button id="slb-date-7d" class="slb-date-shortcut" style="margin-left:4px;">7天</button>
-                                <button id="slb-date-30d" class="slb-date-shortcut">30天</button>
-                            </div>
-                            <div class="slb-filter-row">
-                                🏷️ 球類：
-                                <div class="slb-sport-filter-options" id="slb-sport-filter-options">
-                                    <button type="button" class="slb-sport-filter-btn active" data-sport="ALL">全部</button>
+                            <div id="slb-report-panel" class="slb-report-panel">
+                                <div class="slb-filter-row">
+                                    📅 查詢區間：
+                                    <input type="date" id="slb-date-from" class="slb-date-input">
+                                    <span>~</span>
+                                    <input type="date" id="slb-date-to" class="slb-date-input">
+                                    <button id="slb-date-search" class="slb-date-search-btn">搜尋</button>
+                                    <button id="slb-date-7d" class="slb-date-shortcut" style="margin-left:4px;">7天</button>
+                                    <button id="slb-date-30d" class="slb-date-shortcut">30天</button>
                                 </div>
+                                <div class="slb-filter-row">
+                                    🏷️ 球類：
+                                    <div class="slb-sport-filter-options" id="slb-sport-filter-options">
+                                        <button type="button" class="slb-sport-filter-btn active" data-sport="ALL">全部</button>
+                                    </div>
+                                    <span class="slb-filter-inline-label">💳 派彩狀態：</span>
+                                    <div class="slb-sport-filter-options" id="slb-payout-filter-options">
+                                        <button type="button" class="slb-sport-filter-btn active" data-payout="ALL">全部</button>
+                                        <button type="button" class="slb-sport-filter-btn" data-payout="SETTLED">已派彩</button>
+                                        <button type="button" class="slb-sport-filter-btn" data-payout="PENDING">未派彩</button>
+                                    </div>
+                                </div>
+                                <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在載入資料...</div>
                             </div>
-                            <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在載入資料...</div>
                         </div>
                         <div class="slb-header-github">
                             <a class="slb-github-button" href="https://github.com/asadman1523/sportlotterycomtw_report" target="_blank" rel="noopener noreferrer" aria-label="Star asadman1523/sportlotterycomtw_report on GitHub" title="Star on GitHub">
@@ -769,6 +854,31 @@
                 themeSwitch.addEventListener("click", () => {
                     const currentTheme = document.getElementById("slb-modal-overlay")?.dataset.theme || getPreferredTheme();
                     applyTheme(currentTheme === "light" ? "dark" : "light");
+                });
+            }
+
+            const reportPanel = document.getElementById("slb-report-panel");
+            const reportToggle = document.getElementById("slb-report-toggle");
+            const setReportPanelCollapsed = (collapsed) => {
+                if (!reportPanel || !reportToggle) return;
+                reportPanel.classList.toggle("collapsed", collapsed);
+                reportToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+                reportToggle.setAttribute("title", collapsed ? "展開查詢、篩選與統計" : "收合查詢、篩選與統計");
+                reportToggle.textContent = collapsed ? "展開▲" : "摺疊▼";
+            };
+            if (reportPanel && reportToggle) {
+                const collapsedPref = localStorage.getItem(REPORT_PANEL_COLLAPSED_KEY) === "true";
+                setReportPanelCollapsed(collapsedPref);
+                const toggleReportPanel = () => {
+                    const nextCollapsed = reportToggle.getAttribute("aria-expanded") === "true";
+                    localStorage.setItem(REPORT_PANEL_COLLAPSED_KEY, nextCollapsed ? "true" : "false");
+                    setReportPanelCollapsed(nextCollapsed);
+                };
+                reportToggle.addEventListener("click", toggleReportPanel);
+                reportToggle.addEventListener("keydown", (event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    toggleReportPanel();
                 });
             }
             
@@ -925,7 +1035,7 @@
       }
       
       let csvContent = "\uFEFF"; // BOM for UTF-8 Excel compatibility
-      csvContent += "投注代碼,投注 ID,下注時間,玩法,投注內容,投注額,預計/實際派彩,狀態\n";
+      csvContent += "投注代碼,投注 ID,下注時間,玩法,投注內容,投注額,賠率,預計/實際派彩,狀態\n";
       
       window.currentSLBBets.forEach(b => {
           let createdDate = b.createdDate || "Invalid Date";
@@ -945,6 +1055,7 @@
           
           let stateText = b.betState;
           let displayReturn = b.totalReturn || 0;
+          const displayOdds = formatOdds(getBetOddsValue(b));
           if (["Settled", "CashedOut", "Closed", "Won", "Lost"].includes(b.betState)) {
                stateText = displayReturn > 0 ? "贏" : "輸";
           } else if (b.betState === "Void" || b.betState === "Cancelled") {
@@ -953,7 +1064,7 @@
                stateText = "未派彩";
           }
           
-          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${b.betTypeName || "單場"},${contentText},${b.totalStake},${displayReturn},${stateText}\n`;
+          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${b.betTypeName || "單場"},${contentText},${b.totalStake},${displayOdds},${displayReturn},${stateText}\n`;
       });
       
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -972,11 +1083,12 @@
 
       window.originalSLBBets = betsArray;
       updateSportFilterControls();
+      updatePayoutFilterControls();
 
       window.slbSortCol = window.slbSortCol || 'date';
       if (window.slbSortDesc === undefined) window.slbSortDesc = true;
 
-      const filteredBets = [...betsArray].filter(betMatchesSportFilter);
+      const filteredBets = [...betsArray].filter((bet) => betMatchesSportFilter(bet) && betMatchesPayoutFilter(bet));
       const sortedBets = filteredBets.sort((a, b) => {
           let valA, valB;
           if (window.slbSortCol === 'date') {
@@ -988,6 +1100,9 @@
           } else if (window.slbSortCol === 'stake') {
               valA = a.totalStake || 0;
               valB = b.totalStake || 0;
+          } else if (window.slbSortCol === 'odds') {
+              valA = getBetOddsValue(a) || 0;
+              valB = getBetOddsValue(b) || 0;
           } else if (window.slbSortCol === 'return') {
               valA = a.totalReturn || 0;
               valB = b.totalReturn || 0;
@@ -1030,6 +1145,7 @@
                       <th data-sort="type" style="cursor:pointer; user-select:none;" title="點擊排序">玩法 ${getSortIcon('type')}</th>
                       <th>投注內容</th>
                       <th data-sort="stake" style="cursor:pointer; user-select:none;" title="點擊排序">投注額 ${getSortIcon('stake')}</th>
+                      <th data-sort="odds" style="cursor:pointer; user-select:none;" title="點擊排序">賠率 ${getSortIcon('odds')}</th>
                       <th data-sort="return" style="cursor:pointer; user-select:none;" title="點擊排序">預計/實際派彩 ${getSortIcon('return')}</th>
                       <th data-sort="state" style="cursor:pointer; user-select:none;" title="點擊排序">狀態 ${getSortIcon('state')}</th>
                   </tr>
@@ -1045,6 +1161,7 @@
           let isWin = false;
           
           let displayReturn = b.totalReturn || 0;
+          const displayOdds = formatOdds(getBetOddsValue(b));
 
           if (["Settled", "CashedOut", "Closed", "Won", "Lost"].includes(b.betState)) {
               settledBet += (b.totalStake || 0);
@@ -1121,6 +1238,7 @@
                   <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
                   <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
+                  <td class="slb-amount">${displayOdds}</td>
                   <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
               </tr>
@@ -1134,12 +1252,10 @@
       if (summaryEl) {
           const pl = settledReturn - settledBet;
           summaryEl.innerHTML = `
-            <div style="margin-bottom:6px;">
-                <span class="slb-summary-chip" style="margin-right:8px;">
+            <div class="slb-summary-row">
+                <span class="slb-summary-chip">
                     💰 <b>本金去向</b>：總投入 <b>NT$ ${totalBet}</b> = 未派彩 <span class="slb-summary-warning">NT$ ${pendingStake}</span> + 已結算本金 <b>NT$ ${settledBet}</b>
                 </span>
-            </div>
-            <div>
                 <span class="slb-summary-chip">
                     🏆 <b>結算戰績</b>：總派彩 <span class="slb-summary-success">NT$ ${settledReturn}</span> - 已結算本金 <b>NT$ ${settledBet}</b> = 淨損益 <b class="${pl >= 0 ? 'slb-summary-success' : 'slb-summary-danger'}">NT$ ${pl}</b>
                 </span>
@@ -1247,6 +1363,7 @@
                       data.forEach(item => {
                           if (item.fullExternalReference) {
                               const betId = item.fullExternalReference;
+                              const totalMultiBetOdds = Number(item.totalMultiBetOdds);
                               if (!localDatabase.has(betId)) {
                                   localDatabase.set(betId, {
                                       id: item.idFOBet || item.id || betId,
@@ -1255,12 +1372,17 @@
                                       betTypeName: item.betTypeName,
                                       betState: item.betState,
                                       totalStake: item.totalStake || item.wunitStake || 0,
+                                      odds: Number.isFinite(totalMultiBetOdds) && totalMultiBetOdds > 0 ? totalMultiBetOdds : null,
                                       totalReturn: item.betState === 'Open' ? item.potentialReturn : (item.totalReturn || item.discountedTotalReturn || 0),
                                       ticketId: item.idFOBetslip || item.receipt || item.ticketId || item.externalRef || item.shortId || '',
                                       legs: []
                                   });
                               }
-                              localDatabase.get(betId).legs.push({
+                              const savedBet = localDatabase.get(betId);
+                              if (!savedBet.odds && Number.isFinite(totalMultiBetOdds) && totalMultiBetOdds > 0) {
+                                  savedBet.odds = totalMultiBetOdds;
+                              }
+                              savedBet.legs.push({
                                   idFOSportType: item.idFOSportType,
                                   idFOSport: item.idFOSport,
                                   tournamentName: item.tournamentName,
