@@ -26,6 +26,7 @@ test("bet rows can still expand and collapse", () => {
         source,
         /<td class="slb-content"[^`]*onclick="event\.stopPropagation\(\); this\.classList\.toggle\('expanded'\);"/s
     );
+    assert.match(cssBlock(".slb-table td.slb-content"), /text-align:\s*left;/);
     assert.match(cssBlock(".slb-content.expanded"), /white-space:\s*normal;/);
     assert.match(cssBlock(".slb-content.expanded"), /max-width:\s*400px;/);
     assert.match(cssBlock(".slb-content.expanded div.slb-content-leg"), /display:\s*flex;/);

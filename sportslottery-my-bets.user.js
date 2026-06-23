@@ -807,6 +807,9 @@
         max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         color: var(--slb-text-secondary); cursor: pointer; transition: color 0.2s;
       }
+      .slb-table td.slb-content {
+        text-align: left;
+      }
       .slb-content:hover {
         color: var(--slb-text);
       }
