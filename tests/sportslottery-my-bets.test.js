@@ -28,7 +28,7 @@ test("bet rows can still expand and collapse", () => {
     );
     assert.match(cssBlock(".slb-content.expanded"), /white-space:\s*normal;/);
     assert.match(cssBlock(".slb-content.expanded"), /max-width:\s*400px;/);
-    assert.match(cssBlock(".slb-content.expanded div.slb-content-leg"), /display:\s*block;/);
+    assert.match(cssBlock(".slb-content.expanded div.slb-content-leg"), /display:\s*flex;/);
 });
 
 test("return and profit-loss display stays on one line", () => {
@@ -59,4 +59,14 @@ test("single-leg bets use leg odds when total odds are missing", () => {
         source,
         /function getBetOddsValue\(bet\) \{[\s\S]*Number\(bet\.odds \?\? bet\.totalMultiBetOdds\)[\s\S]*Array\.isArray\(bet\.legs\) && bet\.legs\.length === 1[\s\S]*return getLegOddsValue\(bet\.legs\[0\]\);/
     );
+});
+
+test("multi-leg rows preserve and display per-leg settlement status", () => {
+    assert.match(source, /function getLegStatusKey\(leg\)/);
+    assert.match(source, /betLegStatus:\s*item\.betLegStatus/);
+    assert.match(source, /winWLDOutcome:\s*item\.winWLDOutcome/);
+    assert.match(source, /eventResult:\s*item\.eventResult/);
+    assert.match(source, /slb-leg-status-icon-win/);
+    assert.match(source, /slb-leg-status-icon-lose/);
+    assert.match(source, /slb-leg-status-icon-pending/);
 });
