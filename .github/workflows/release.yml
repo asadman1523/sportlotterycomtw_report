@@ -16,6 +16,32 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Run Tests
+        run: npm test
+
+      - name: Generate Release Notes
+        run: |
+          set -euo pipefail
+          previous_tag="$(git tag --sort=-v:refname | head -n 1 || true)"
+
+          {
+            echo "## 這次更動"
+            echo
+            if [ -n "$previous_tag" ]; then
+              git log --pretty=format:'- %s (%h)' "$previous_tag"..HEAD
+            else
+              git log --pretty=format:'- %s (%h)' -n 10
+            fi
+            echo
+            echo
+            echo "## 驗證"
+            echo
+            echo "- npm test"
+            echo "- 檢查 extension zip 必要檔案"
+          } > release-notes.md
 
       - name: Zip Extension Files
         run: |
@@ -47,6 +73,6 @@ jobs:
           files: sportslottery-extension.zip
           tag_name: v${{ github.run_number }}
           name: Release v${{ github.run_number }}
-          body: Auto-generated release from latest push.
+          body_path: release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
