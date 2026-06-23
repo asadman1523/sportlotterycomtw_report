@@ -53,3 +53,10 @@ test("unsettled bets do not show potential return as actual payout", () => {
         /function getNetProfitLoss\(bet\) \{[\s\S]*if \(!isSettledBet\(bet\)\) return null;/
     );
 });
+
+test("single-leg bets use leg odds when total odds are missing", () => {
+    assert.match(
+        source,
+        /function getBetOddsValue\(bet\) \{[\s\S]*Number\(bet\.odds \?\? bet\.totalMultiBetOdds\)[\s\S]*Array\.isArray\(bet\.legs\) && bet\.legs\.length === 1[\s\S]*return getLegOddsValue\(bet\.legs\[0\]\);/
+    );
+});
