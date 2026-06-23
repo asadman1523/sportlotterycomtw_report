@@ -261,7 +261,11 @@
 
   function getBetOddsValue(bet) {
       const odds = Number(bet.odds ?? bet.totalMultiBetOdds);
-      return Number.isFinite(odds) && odds > 0 ? odds : null;
+      if (Number.isFinite(odds) && odds > 0) return odds;
+      if (Array.isArray(bet.legs) && bet.legs.length === 1) {
+          return getLegOddsValue(bet.legs[0]);
+      }
+      return null;
   }
 
   function getDecimalOddsFromFraction(up, down) {
