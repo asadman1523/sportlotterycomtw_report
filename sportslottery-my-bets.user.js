@@ -669,6 +669,42 @@
       .slb-row:hover {
         background: var(--slb-hover);
       }
+      .slb-copy-head,
+      .slb-copy-cell {
+        width: 44px; min-width: 44px; max-width: 44px;
+        padding-left: 4px !important; padding-right: 8px !important;
+      }
+      .slb-copy-row-btn {
+        width: 28px; height: 28px; border-radius: 6px;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: transparent; border: 1px solid transparent;
+        color: var(--slb-text-muted); cursor: pointer;
+        opacity: 0; transform: translateX(4px);
+        transition: opacity 0.16s ease, transform 0.16s ease, color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+      }
+      .slb-row:hover .slb-copy-row-btn,
+      .slb-copy-row-btn:focus-visible {
+        opacity: 1; transform: translateX(0);
+      }
+      .slb-copy-row-btn:hover {
+        background: var(--slb-chip-bg); border-color: var(--slb-border-strong);
+        color: var(--slb-text);
+      }
+      .slb-copy-row-btn.copied {
+        opacity: 1; transform: translateX(0);
+        color: var(--slb-success); border-color: var(--slb-success);
+        background: var(--slb-success-soft);
+      }
+      .slb-copy-row-btn.copied .slb-copy-icon {
+        display: none;
+      }
+      .slb-copy-row-btn.copied::before {
+        content: "✓"; font-size: 15px; font-weight: 800;
+      }
+      .slb-copy-icon {
+        width: 15px; height: 15px; stroke: currentColor; fill: none;
+        stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+      }
       .slb-date { font-size: 13px; color: var(--slb-text-muted); white-space: nowrap; }
       .slb-table th, .slb-table td {
         padding: 12px; text-align: center; border-bottom: 1px solid var(--slb-border);
@@ -1028,6 +1064,42 @@
       if (lel) lel.innerHTML = text;
   }
 
+  async function copyTextToClipboard(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+          return;
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.top = "-1000px";
+      textarea.style.left = "-1000px";
+      document.body.appendChild(textarea);
+      textarea.select();
+
+      try {
+          if (!document.execCommand("copy")) {
+              throw new Error("Copy command failed");
+          }
+      } finally {
+          document.body.removeChild(textarea);
+      }
+  }
+
+  function flashCopiedState(button) {
+      button.classList.add("copied");
+      button.title = "已複製";
+      button.setAttribute("aria-label", "已複製整行");
+
+      window.setTimeout(() => {
+          button.classList.remove("copied");
+          button.title = "複製整行";
+          button.setAttribute("aria-label", "複製整行");
+      }, 900);
+  }
+
   function exportCSV() {
       if (!window.currentSLBBets || window.currentSLBBets.length === 0) {
           alert("目前沒有資料可匯出！");
@@ -1148,6 +1220,7 @@
                       <th data-sort="odds" style="cursor:pointer; user-select:none;" title="點擊排序">賠率 ${getSortIcon('odds')}</th>
                       <th data-sort="return" style="cursor:pointer; user-select:none;" title="點擊排序">預計/實際派彩 ${getSortIcon('return')}</th>
                       <th data-sort="state" style="cursor:pointer; user-select:none;" title="點擊排序">狀態 ${getSortIcon('state')}</th>
+                      <th class="slb-copy-head" aria-label="複製"></th>
                   </tr>
               </thead>
               <tbody>
@@ -1206,6 +1279,7 @@
 
           let contentText = "";
           let fullContentText = "";
+          let rowContentText = "";
           
           const metaHtml = `<div class="slb-content-meta" style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; user-select:text; cursor:auto;" onclick="event.stopPropagation();">
               <div><b class="slb-meta-label">投注代碼：</b> ${escapeHTML(b.ticketId || b.id || '無')}</div>
@@ -1213,24 +1287,36 @@
           </div>`;
 
           if (b.legs && b.legs.length > 0) {
+              const rawLegTexts = b.legs.map(leg => {
+                  const ev = leg.eventName || '未知';
+                  const mk = leg.marketName || '';
+                  const sel = leg.selectionName || '';
+                  return `[${ev}] ${mk} - ${sel}`;
+              });
               const htmlLegTexts = b.legs.map(leg => {
                   const ev = escapeHTML(leg.eventName || '未知');
                   const mk = escapeHTML(leg.marketName || '');
                   const sel = escapeHTML(leg.selectionName || '');
                   return `<div class="slb-content-leg">[${ev}] ${mk} - <b>${sel}</b></div>`;
               });
-              const plainLegTexts = b.legs.map(leg => {
-                  const ev = escapeHTML(leg.eventName || '未知');
-                  const mk = escapeHTML(leg.marketName || '');
-                  const sel = escapeHTML(leg.selectionName || '');
-                  return `[${ev}] ${mk} - ${sel}`;
-              });
               contentText = metaHtml + htmlLegTexts.join("");
-              fullContentText = plainLegTexts.join("\n");
+              fullContentText = rawLegTexts.map(escapeHTML).join("\n");
+              rowContentText = rawLegTexts.join(" | ");
           } else {
               contentText = metaHtml + "<div class='slb-content-leg'>無法讀取詳細資訊</div>";
               fullContentText = "無法讀取詳細資訊";
+              rowContentText = "無法讀取詳細資訊";
           }
+
+          const rowCopyText = [
+              createdDate,
+              b.betTypeName || "單場",
+              rowContentText,
+              `NT$ ${b.totalStake || 0}`,
+              displayOdds,
+              `NT$ ${displayReturn}`,
+              badgeText
+          ].join("\t");
 
           tableHtml += `
               <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
@@ -1241,6 +1327,14 @@
                   <td class="slb-amount">${displayOdds}</td>
                   <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
+                  <td class="slb-copy-cell">
+                      <button type="button" class="slb-copy-row-btn" title="複製整行" aria-label="複製整行" data-copy-text="${escapeHTML(rowCopyText)}">
+                          <svg class="slb-copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+                              <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                          </svg>
+                      </button>
+                  </td>
               </tr>
           `;
       });
@@ -1273,6 +1367,21 @@
                   window.slbSortDesc = true;
               }
               renderBets(window.originalSLBBets);
+          });
+      });
+
+      container.querySelectorAll(".slb-copy-row-btn").forEach(button => {
+          button.addEventListener("click", async (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+
+              try {
+                  await copyTextToClipboard(button.dataset.copyText || "");
+                  flashCopiedState(button);
+              } catch (err) {
+                  console.warn("Failed to copy row", err);
+                  alert("複製失敗，請再試一次。");
+              }
           });
       });
   }
