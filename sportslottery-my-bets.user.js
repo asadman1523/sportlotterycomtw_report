@@ -33,6 +33,10 @@
     lose: "\u8f38",
     pending: "\u672a\u6d3e\u5f69",
     voided: "\u9000\u56de",
+    legWin: "\u904e",
+    legLose: "\u5012",
+    legPending: "\u672a\u7d50",
+    legVoid: "\u9000",
     unknown: "-",
     bet: "\u6295\u6ce8",
     option: "\u6295\u6ce8\u9078\u9805",
@@ -251,6 +255,25 @@
 
   function getPayoutStatus(bet) {
       return isSettledBet(bet) ? "SETTLED" : "PENDING";
+  }
+
+  function getLegStatusKey(leg) {
+      const rawStatus = String(leg?.betLegStatus || "").trim().toLowerCase();
+      const rawOutcome = String(leg?.winWLDOutcome || "").trim().toUpperCase();
+      if (["won", "win"].includes(rawStatus) || rawOutcome === "W") return "WON";
+      if (["lost", "lose"].includes(rawStatus) || rawOutcome === "L") return "LOST";
+      if (["void", "voided", "cancelled", "canceled", "refund", "refunded", "push"].includes(rawStatus) || ["V", "P", "R"].includes(rawOutcome)) return "VOID";
+      if (rawStatus === "open" || rawStatus === "pending" || rawOutcome === "O") return "OPEN";
+      return "UNKNOWN";
+  }
+
+  function getLegStatusMeta(leg) {
+      const status = getLegStatusKey(leg);
+      if (status === "WON") return { text: TEXT.legWin, className: "slb-leg-status-icon-win" };
+      if (status === "LOST") return { text: TEXT.legLose, className: "slb-leg-status-icon-lose" };
+      if (status === "VOID") return { text: TEXT.legVoid, className: "slb-leg-status-icon-void" };
+      if (status === "OPEN") return { text: TEXT.legPending, className: "slb-leg-status-icon-pending" };
+      return { text: "", className: "" };
   }
 
   function betMatchesPayoutFilter(bet) {
@@ -801,7 +824,9 @@
         margin: 0 4px;
       }
       .slb-content.expanded div.slb-content-leg {
-        display: block;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
         margin-bottom: 6px;
         padding-bottom: 6px;
         border-bottom: 1px dashed var(--slb-border-strong);
@@ -821,6 +846,63 @@
         font-size: 12px;
         font-weight: 700;
         white-space: nowrap;
+      }
+      .slb-leg-status-icon {
+        width: 16px;
+        height: 16px;
+        border-radius: 9999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-right: 6px;
+        vertical-align: -3px;
+        font-size: 12px;
+        font-weight: 900;
+        line-height: 1;
+        box-sizing: border-box;
+        flex: 0 0 auto;
+        position: relative;
+      }
+      .slb-content.expanded .slb-leg-status-icon {
+        margin-top: 2px;
+        margin-right: 0;
+      }
+      .slb-leg-status-icon-win { background: var(--slb-success-soft); color: var(--slb-success); border: 1px solid var(--slb-success); }
+      .slb-leg-status-icon-win::before { content: "\\2713"; }
+      .slb-leg-status-icon-lose { background: var(--slb-danger-soft); color: var(--slb-danger); border: 1px solid var(--slb-danger); }
+      .slb-leg-status-icon-lose::before,
+      .slb-leg-status-icon-lose::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 9px;
+        height: 1.5px;
+        border-radius: 9999px;
+        background: currentColor;
+        transform-origin: center;
+      }
+      .slb-leg-status-icon-lose::before { transform: translate(-50%, -50%) rotate(45deg); }
+      .slb-leg-status-icon-lose::after { transform: translate(-50%, -50%) rotate(-45deg); }
+      .slb-leg-status-icon-pending { background: transparent; border: 1px dashed var(--slb-text-muted); }
+      .slb-leg-status-icon-void { background: var(--slb-chip-bg); color: var(--slb-text-muted); border: 1px solid var(--slb-border-strong); }
+      .slb-leg-status-icon-void::before { content: "-"; }
+      .slb-leg-line {
+        min-width: 0;
+      }
+      .slb-leg-result {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        background: var(--slb-chip-bg);
+        color: var(--slb-text-muted);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      .slb-content:not(.expanded) .slb-leg-result {
+        display: none;
       }
       .slb-content:not(.expanded) .slb-content-meta {
         display: none !important;
@@ -854,7 +936,6 @@
       .slb-badge-pending { background: var(--slb-warning-soft); color: var(--slb-warning); border: 1px solid var(--slb-warning); }
       .slb-badge-win { background: var(--slb-success-soft); color: var(--slb-success); border: 1px solid var(--slb-success); }
       .slb-badge-lose { background: var(--slb-danger-soft); color: var(--slb-danger); border: 1px solid var(--slb-danger); }
-      
       .slb-loading-container {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         height: 100%; width: 100%; color: var(--slb-primary); grid-column: 1/-1;
@@ -1217,7 +1298,8 @@
           let legTexts = b.legs ? b.legs.map(leg => {
               const legOdds = getLegOddsValue(leg);
               const oddsText = legOdds === null ? "" : ` @ ${formatOdds(legOdds)}`;
-              return `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}${oddsText}`;
+              const resultText = leg.eventResult ? ` 賽果 ${leg.eventResult}` : "";
+              return `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}${oddsText}${resultText}`;
           }) : [];
           let contentText = legTexts.join(" | ");
           contentText = '"' + contentText.replace(/"/g, '""') + '"'; // Escape quotes for CSV
@@ -1390,7 +1472,8 @@
                   const sel = leg.selectionName || '';
                   const legOdds = getLegOddsValue(leg);
                   const oddsText = legOdds === null ? "" : ` @ ${formatOdds(legOdds)}`;
-                  return `[${ev}] ${mk} - ${sel}${oddsText}`;
+                  const resultText = leg.eventResult ? ` 賽果 ${leg.eventResult}` : "";
+                  return `[${ev}] ${mk} - ${sel}${oddsText}${resultText}`;
               });
               const htmlLegTexts = b.legs.map(leg => {
                   const ev = escapeHTML(leg.eventName || '未知');
@@ -1398,7 +1481,10 @@
                   const sel = escapeHTML(leg.selectionName || '');
                   const legOdds = getLegOddsValue(leg);
                   const oddsHtml = legOdds === null ? "" : ` <span class="slb-leg-odds">賠率 ${formatOdds(legOdds)}</span>`;
-                  return `<div class="slb-content-leg">[${ev}] ${mk} - <b>${sel}</b>${oddsHtml}</div>`;
+                  const legStatus = getLegStatusMeta(leg);
+                  const statusIconHtml = legStatus.text ? `<span class="slb-leg-status-icon ${legStatus.className}" title="${escapeHTML(legStatus.text)}" aria-label="${escapeHTML(legStatus.text)}"></span>` : "";
+                  const resultHtml = leg.eventResult ? ` <span class="slb-leg-result">賽果 ${escapeHTML(leg.eventResult)}</span>` : "";
+                  return `<div class="slb-content-leg">${statusIconHtml}<span class="slb-leg-line">[${ev}] ${mk} - <b>${sel}</b>${oddsHtml}${resultHtml}</span></div>`;
               });
               contentText = metaHtml + htmlLegTexts.join("");
               fullContentText = rawLegTexts.map(escapeHTML).join("\n");
@@ -1436,7 +1522,9 @@
                           <span class="${profitLossClass}">${getNetProfitLossDisplay(b)}</span>
                       </span>
                   </td>
-                  <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
+                  <td>
+                      <span class="slb-badge ${badgeClass}">${badgeText}</span>
+                  </td>
                   <td class="slb-copy-cell">
                       <button type="button" class="slb-copy-row-btn" title="複製整行" aria-label="複製整行" data-copy-text="${escapeHTML(rowCopyText)}">
                           <svg class="slb-copy-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -1607,8 +1695,13 @@
                                   idFOSport: item.idFOSport,
                                   tournamentName: item.tournamentName,
                                   eventName: item.eventName,
+                                  eventResult: item.eventResult,
                                   marketName: item.marketName,
                                   selectionName: item.selectionName,
+                                  betLegStatus: item.betLegStatus,
+                                  betResult: item.betResult,
+                                  winWLDOutcome: item.winWLDOutcome,
+                                  outcome: item.outcome,
                                   odds: legOdds,
                                   ownPriceUp: item.ownPriceUp,
                                   ownPriceDown: item.ownPriceDown,
