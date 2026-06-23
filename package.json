@@ -1,0 +1,8 @@
+{
+  "name": "sportslottery-bet-ui",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --check sportslottery-my-bets.user.js && node --test tests/*.test.js"
+  }
+}

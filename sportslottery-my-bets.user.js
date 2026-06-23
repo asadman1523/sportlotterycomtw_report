@@ -302,6 +302,35 @@
       return formatOdds(getBetOddsValue(bet));
   }
 
+  function formatCurrency(amount) {
+      const value = Number(amount);
+      return Number.isFinite(value) ? `NT$ ${value}` : "-";
+  }
+
+  function getActualReturnDisplay(bet) {
+      return isSettledBet(bet) ? formatCurrency(bet.totalReturn || 0) : "-";
+  }
+
+  function getNetProfitLoss(bet) {
+      if (!isSettledBet(bet)) return null;
+      return (Number(bet.totalReturn) || 0) - (Number(bet.totalStake) || 0);
+  }
+
+  function getNetProfitLossDisplay(bet) {
+      const profitLoss = getNetProfitLoss(bet);
+      return profitLoss === null ? "-" : formatCurrency(profitLoss);
+  }
+
+  function getReturnProfitText(bet) {
+      return `${getActualReturnDisplay(bet)} / ${getNetProfitLossDisplay(bet)}`;
+  }
+
+  function getProfitLossClass(bet) {
+      const profitLoss = getNetProfitLoss(bet);
+      if (profitLoss === null) return "";
+      return profitLoss >= 0 ? "slb-summary-success" : "slb-summary-danger";
+  }
+
   function formatOdds(odds) {
       return odds === null ? "-" : odds.toFixed(2);
   }
@@ -749,7 +778,7 @@
       }
       .slb-content {
         max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        color: var(--slb-text-secondary); cursor: pointer; transition: all 0.2s;
+        color: var(--slb-text-secondary); cursor: pointer; transition: color 0.2s;
       }
       .slb-content:hover {
         color: var(--slb-text);
@@ -802,6 +831,17 @@
       }
       .slb-amount { font-weight: 700; white-space: nowrap; }
       .slb-amount.win { color: var(--slb-success); }
+      .slb-return-profit {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        line-height: 1;
+        white-space: nowrap;
+      }
+      .slb-return-profit-separator {
+        color: var(--slb-text-muted);
+      }
       
       .slb-badge {
         padding: 4px 8px; border-radius: 9999px; font-size: 12px; font-weight: 600;
@@ -1156,7 +1196,7 @@
       }
       
       let csvContent = "\uFEFF"; // BOM for UTF-8 Excel compatibility
-      csvContent += "投注代碼,投注 ID,下注時間,玩法,投注內容,投注額,賠率,預計/實際派彩,狀態\n";
+      csvContent += "投注代碼,投注 ID,下注時間,玩法,投注內容,投注額,賠率,實際派彩/淨損益,狀態\n";
       
       window.currentSLBBets.forEach(b => {
           let createdDate = b.createdDate || "Invalid Date";
@@ -1189,7 +1229,7 @@
                stateText = "未派彩";
           }
           
-          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${getBetTypeDisplay(b)},${contentText},${b.totalStake},${displayOdds},${displayReturn},${stateText}\n`;
+          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${getBetTypeDisplay(b)},${contentText},${b.totalStake},${displayOdds},"${getReturnProfitText(b)}",${stateText}\n`;
       });
       
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -1229,8 +1269,8 @@
               valA = getBetOddsValue(a) || 0;
               valB = getBetOddsValue(b) || 0;
           } else if (window.slbSortCol === 'return') {
-              valA = a.totalReturn || 0;
-              valB = b.totalReturn || 0;
+              valA = isSettledBet(a) ? (a.totalReturn || 0) : 0;
+              valB = isSettledBet(b) ? (b.totalReturn || 0) : 0;
           } else if (window.slbSortCol === 'state') {
               valA = a.betState || "";
               valB = b.betState || "";
@@ -1271,7 +1311,7 @@
                       <th>投注內容</th>
                       <th data-sort="stake" style="cursor:pointer; user-select:none;" title="點擊排序">投注額 ${getSortIcon('stake')}</th>
                       <th data-sort="odds" style="cursor:pointer; user-select:none;" title="點擊排序">賠率 ${getSortIcon('odds')}</th>
-                      <th data-sort="return" style="cursor:pointer; user-select:none;" title="點擊排序">預計/實際派彩 ${getSortIcon('return')}</th>
+                      <th data-sort="return" style="cursor:pointer; user-select:none;" title="點擊排序">實際派彩/淨損益 ${getSortIcon('return')}</th>
                       <th data-sort="state" style="cursor:pointer; user-select:none;" title="點擊排序">狀態 ${getSortIcon('state')}</th>
                       <th class="slb-copy-head" aria-label="複製"></th>
                   </tr>
@@ -1371,9 +1411,12 @@
               rowContentText,
               `NT$ ${b.totalStake || 0}`,
               displayOdds,
-              `NT$ ${displayReturn}`,
+              getReturnProfitText(b),
               badgeText
           ].join("\t");
+
+          const returnProfitText = getReturnProfitText(b);
+          const profitLossClass = getProfitLossClass(b);
 
           tableHtml += `
               <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
@@ -1382,7 +1425,13 @@
                   <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
                   <td class="slb-amount">${displayOdds}</td>
-                  <td class="slb-amount ${isWin ? 'win' : ''}">NT$ ${displayReturn}</td>
+                  <td class="slb-amount ${isWin ? 'win' : ''}" title="${escapeHTML(returnProfitText)}">
+                      <span class="slb-return-profit">
+                          <span>${getActualReturnDisplay(b)}</span>
+                          <span class="slb-return-profit-separator">/</span>
+                          <span class="${profitLossClass}">${getNetProfitLossDisplay(b)}</span>
+                      </span>
+                  </td>
                   <td><span class="slb-badge ${badgeClass}">${badgeText}</span></td>
                   <td class="slb-copy-cell">
                       <button type="button" class="slb-copy-row-btn" title="複製整行" aria-label="複製整行" data-copy-text="${escapeHTML(rowCopyText)}">
