@@ -264,6 +264,44 @@
       return Number.isFinite(odds) && odds > 0 ? odds : null;
   }
 
+  function getDecimalOddsFromFraction(up, down) {
+      const upValue = Number(up);
+      const downValue = Number(down);
+      if (!Number.isFinite(upValue) || !Number.isFinite(downValue) || downValue <= 0) return null;
+      const odds = 1 + (upValue / downValue);
+      return Number.isFinite(odds) && odds >= 1 ? odds : null;
+  }
+
+  function getItemOddsValue(item) {
+      return getDecimalOddsFromFraction(item.ownPriceUp, item.ownPriceDown)
+          ?? getDecimalOddsFromFraction(item.settlementpriceup, item.settlementpricedown)
+          ?? getDecimalOddsFromFraction(item.ownMultiPriceUp, item.ownMultiPriceDown);
+  }
+
+  function getLegOddsValue(leg) {
+      const odds = Number(leg && leg.odds);
+      return Number.isFinite(odds) && odds > 0 ? odds : null;
+  }
+
+  function isMultiSingleBet(bet) {
+      return (bet.betTypeName || "").trim() === "一關" && Array.isArray(bet.legs) && bet.legs.length > 1;
+  }
+
+  function getBetTypeDisplay(bet) {
+      const typeName = bet.betTypeName || "單場";
+      return isMultiSingleBet(bet) ? `${typeName} x${bet.legs.length}` : typeName;
+  }
+
+  function getBetOddsDisplay(bet) {
+      if (isMultiSingleBet(bet)) {
+          const legOdds = bet.legs
+              .map((leg) => getLegOddsValue(leg))
+              .filter((odds) => odds !== null);
+          if (legOdds.length > 0) return legOdds.map(formatOdds).join(" / ");
+      }
+      return formatOdds(getBetOddsValue(bet));
+  }
+
   function formatOdds(odds) {
       return odds === null ? "-" : odds.toFixed(2);
   }
@@ -740,6 +778,17 @@
         margin-bottom: 0;
         padding-bottom: 0;
       }
+      .slb-leg-odds {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--slb-chip-bg);
+        color: var(--slb-text-secondary);
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
       .slb-content:not(.expanded) .slb-content-meta {
         display: none !important;
       }
@@ -1121,13 +1170,17 @@
               }
           }
           
-          let legTexts = b.legs ? b.legs.map(leg => `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}`) : [];
+          let legTexts = b.legs ? b.legs.map(leg => {
+              const legOdds = getLegOddsValue(leg);
+              const oddsText = legOdds === null ? "" : ` @ ${formatOdds(legOdds)}`;
+              return `[${leg.eventName}] ${leg.marketName} - ${leg.selectionName}${oddsText}`;
+          }) : [];
           let contentText = legTexts.join(" | ");
           contentText = '"' + contentText.replace(/"/g, '""') + '"'; // Escape quotes for CSV
           
           let stateText = b.betState;
           let displayReturn = b.totalReturn || 0;
-          const displayOdds = formatOdds(getBetOddsValue(b));
+          const displayOdds = getBetOddsDisplay(b);
           if (["Settled", "CashedOut", "Closed", "Won", "Lost"].includes(b.betState)) {
                stateText = displayReturn > 0 ? "贏" : "輸";
           } else if (b.betState === "Void" || b.betState === "Cancelled") {
@@ -1136,7 +1189,7 @@
                stateText = "未派彩";
           }
           
-          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${b.betTypeName || "單場"},${contentText},${b.totalStake},${displayOdds},${displayReturn},${stateText}\n`;
+          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${getBetTypeDisplay(b)},${contentText},${b.totalStake},${displayOdds},${displayReturn},${stateText}\n`;
       });
       
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -1234,7 +1287,7 @@
           let isWin = false;
           
           let displayReturn = b.totalReturn || 0;
-          const displayOdds = formatOdds(getBetOddsValue(b));
+          const displayOdds = getBetOddsDisplay(b);
 
           if (["Settled", "CashedOut", "Closed", "Won", "Lost"].includes(b.betState)) {
               settledBet += (b.totalStake || 0);
@@ -1291,13 +1344,17 @@
                   const ev = leg.eventName || '未知';
                   const mk = leg.marketName || '';
                   const sel = leg.selectionName || '';
-                  return `[${ev}] ${mk} - ${sel}`;
+                  const legOdds = getLegOddsValue(leg);
+                  const oddsText = legOdds === null ? "" : ` @ ${formatOdds(legOdds)}`;
+                  return `[${ev}] ${mk} - ${sel}${oddsText}`;
               });
               const htmlLegTexts = b.legs.map(leg => {
                   const ev = escapeHTML(leg.eventName || '未知');
                   const mk = escapeHTML(leg.marketName || '');
                   const sel = escapeHTML(leg.selectionName || '');
-                  return `<div class="slb-content-leg">[${ev}] ${mk} - <b>${sel}</b></div>`;
+                  const legOdds = getLegOddsValue(leg);
+                  const oddsHtml = legOdds === null ? "" : ` <span class="slb-leg-odds">賠率 ${formatOdds(legOdds)}</span>`;
+                  return `<div class="slb-content-leg">[${ev}] ${mk} - <b>${sel}</b>${oddsHtml}</div>`;
               });
               contentText = metaHtml + htmlLegTexts.join("");
               fullContentText = rawLegTexts.map(escapeHTML).join("\n");
@@ -1310,7 +1367,7 @@
 
           const rowCopyText = [
               createdDate,
-              b.betTypeName || "單場",
+              getBetTypeDisplay(b),
               rowContentText,
               `NT$ ${b.totalStake || 0}`,
               displayOdds,
@@ -1321,7 +1378,7 @@
           tableHtml += `
               <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
                   <td class="slb-date">${createdDate}</td>
-                  <td class="slb-type">${escapeHTML(b.betTypeName || "單場")}</td>
+                  <td class="slb-type">${escapeHTML(getBetTypeDisplay(b))}</td>
                   <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
                   <td class="slb-amount">${displayOdds}</td>
@@ -1473,6 +1530,7 @@
                           if (item.fullExternalReference) {
                               const betId = item.fullExternalReference;
                               const totalMultiBetOdds = Number(item.totalMultiBetOdds);
+                              const legOdds = getItemOddsValue(item);
                               if (!localDatabase.has(betId)) {
                                   localDatabase.set(betId, {
                                       id: item.idFOBet || item.id || betId,
@@ -1497,7 +1555,12 @@
                                   tournamentName: item.tournamentName,
                                   eventName: item.eventName,
                                   marketName: item.marketName,
-                                  selectionName: item.selectionName
+                                  selectionName: item.selectionName,
+                                  odds: legOdds,
+                                  ownPriceUp: item.ownPriceUp,
+                                  ownPriceDown: item.ownPriceDown,
+                                  wunitStake: item.wunitStake,
+                                  legOrder: item.legOrder
                               });
                           }
                       });
