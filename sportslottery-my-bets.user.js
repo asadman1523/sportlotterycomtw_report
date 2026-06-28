@@ -999,7 +999,8 @@
                                     <span>~</span>
                                     <input type="date" id="slb-date-to" class="slb-date-input">
                                     <button id="slb-date-search" class="slb-date-search-btn">搜尋</button>
-                                    <button id="slb-date-7d" class="slb-date-shortcut" style="margin-left:4px;">7天</button>
+                                    <button id="slb-date-24h" class="slb-date-shortcut" style="margin-left:4px;">24小時</button>
+                                    <button id="slb-date-7d" class="slb-date-shortcut">7天</button>
                                     <button id="slb-date-30d" class="slb-date-shortcut">30天</button>
                                 </div>
                                 <div class="slb-filter-row">
@@ -1136,20 +1137,17 @@
                 toEl.value = formatD(today);
             }
 
-            document.getElementById("slb-date-search").addEventListener("click", async () => {
+            const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
+            const formatDateTime = d => `${formatD(d)}T${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}.${d.getMilliseconds().toString().padStart(3, '0')}`;
+            const fetchManualQuery = async (queryStr) => {
                 if (!await ensureDisclaimerStateLoaded()) {
                     showDisclaimerNotice();
                     return;
                 }
-                const fv = document.getElementById("slb-date-from").value;
-                const tv = document.getElementById("slb-date-to").value;
-                if (!fv || !tv) return;
-                
-                const newQs = `from=${fv}T00:00:00.000&to=${tv}T23:59:59.999`;
-                
+
                 const statusEl = document.getElementById("slb-status-text");
                 if(statusEl) statusEl.innerHTML = "正在拉取指定區間...";
-                
+
                 const contentEl = document.getElementById("slb-modal-content");
                 if (contentEl) {
                     contentEl.innerHTML = `
@@ -1166,32 +1164,49 @@
                 for (let i = 0; i < frames.length; i++) {
                     frames[i].contentWindow.postMessage({
                         type: 'SLB_FETCH_MANUAL',
-                        queryStr: newQs
+                        queryStr
                     }, '*');
                 }
+            };
+
+            document.getElementById("slb-date-search").addEventListener("click", async () => {
+                const fv = document.getElementById("slb-date-from").value;
+                const tv = document.getElementById("slb-date-to").value;
+                if (!fv || !tv) return;
+
+                await fetchManualQuery(`from=${fv}T00:00:00.000&to=${tv}T23:59:59.999`);
             });
 
-            document.getElementById("slb-date-7d").addEventListener("click", () => {
-                const today = new Date();
-                const past = new Date(); past.setDate(today.getDate() - 7);
-                const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
-                const fromEl = document.getElementById("slb-date-from");
-                const toEl = document.getElementById("slb-date-to");
-                if(fromEl) fromEl.value = formatD(past);
-                if(toEl) toEl.value = formatD(today);
-                document.getElementById("slb-date-search").click();
-            });
+            const setupHourShortcutButton = (buttonId, hours) => {
+                const button = document.getElementById(buttonId);
+                if (!button) return;
+                button.addEventListener("click", async () => {
+                    const now = new Date();
+                    const past = new Date(now.getTime() - hours * 60 * 60 * 1000);
+                    const fromEl = document.getElementById("slb-date-from");
+                    const toEl = document.getElementById("slb-date-to");
+                    if(fromEl) fromEl.value = formatD(past);
+                    if(toEl) toEl.value = formatD(now);
+                    await fetchManualQuery(`from=${formatDateTime(past)}&to=${formatDateTime(now)}`);
+                });
+            };
 
-            document.getElementById("slb-date-30d").addEventListener("click", () => {
-                const today = new Date();
-                const past = new Date(); past.setDate(today.getDate() - 30);
-                const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
-                const fromEl = document.getElementById("slb-date-from");
-                const toEl = document.getElementById("slb-date-to");
-                if(fromEl) fromEl.value = formatD(past);
-                if(toEl) toEl.value = formatD(today);
-                document.getElementById("slb-date-search").click();
-            });
+            const setupDateShortcutButton = (buttonId, days) => {
+                const button = document.getElementById(buttonId);
+                if (!button) return;
+                button.addEventListener("click", () => {
+                    const today = new Date();
+                    const past = new Date(); past.setDate(today.getDate() - days);
+                    const fromEl = document.getElementById("slb-date-from");
+                    const toEl = document.getElementById("slb-date-to");
+                    if(fromEl) fromEl.value = formatD(past);
+                    if(toEl) toEl.value = formatD(today);
+                    document.getElementById("slb-date-search").click();
+                });
+            };
+            setupHourShortcutButton("slb-date-24h", 24);
+            setupDateShortcutButton("slb-date-7d", 7);
+            setupDateShortcutButton("slb-date-30d", 30);
         } else {
             applyTheme(getPreferredTheme());
             overlay.style.display = "flex";

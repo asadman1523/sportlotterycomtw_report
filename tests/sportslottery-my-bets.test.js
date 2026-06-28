@@ -44,6 +44,15 @@ test("return and profit-loss display stays on one line", () => {
     );
 });
 
+test("date shortcut buttons include 24 hours, 7 days, and 30 days", () => {
+    assert.match(source, /id="slb-date-24h"[^>]*>24小時<\/button>/);
+    assert.match(source, /id="slb-date-7d"[^>]*>7天<\/button>/);
+    assert.match(source, /id="slb-date-30d"[^>]*>30天<\/button>/);
+    assert.match(source, /setupHourShortcutButton\("slb-date-24h",\s*24\);/);
+    assert.match(source, /setupDateShortcutButton\("slb-date-7d",\s*7\);/);
+    assert.match(source, /setupDateShortcutButton\("slb-date-30d",\s*30\);/);
+});
+
 test("unsettled bets do not show potential return as actual payout", () => {
     assert.match(
         source,
