@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "運彩視覺化UI",
-  "version": "1.0.9",
+  "version": "1.0.18",
   "description": "自動統計與彙整台灣運彩歷史投注報表",
   "permissions": [
     "storage"
@@ -25,7 +25,10 @@
   "host_permissions": [],
   "web_accessible_resources": [
     {
-      "resources": ["inject.js"],
+      "resources": [
+        "inject.js",
+        "assets/LINE_logo.svg.webp"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

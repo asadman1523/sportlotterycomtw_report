@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: June 15, 2026
+Last updated: July 4, 2026
 
 ## Overview
 
@@ -10,15 +10,21 @@ Last updated: June 15, 2026
 
 The extension reads betting history data that is already loaded in the user's browser on supported Taiwan Sports Lottery pages. This may include bet time, bet type, bet amount, payout amount, ticket or bet identifiers, bet status, and related match or selection details.
 
+For Pro activation, the extension creates and stores a random local device ID in the user's browser. If the user enters a Pro activation code, the extension stores that code and its verified license payload locally in the browser.
+
 ## How Data Is Used
 
 The data is used only to generate local summaries, tables, sorting, and CSV export features in the user's browser.
+
+The local device ID is used only to verify that a Pro activation code belongs to the current browser installation.
 
 ## Data Storage and Sharing
 
 The extension does not send betting data, browsing data, account data, or exported CSV data to the developer or to any developer-operated server.
 
-The extension may store a local display preference, such as whether the report panel should open by default, in the user's browser local storage.
+The extension may store local display preferences, such as whether the report panel should open by default, in the user's browser local storage.
+
+When purchasing Pro, the user may voluntarily contact the developer through Line and provide the local device ID to receive an activation code. The extension does not automatically transmit betting history, account data, or exported files during this process.
 
 ## Third Parties
 

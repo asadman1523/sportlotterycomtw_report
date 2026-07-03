@@ -20,13 +20,39 @@
       PENDING: "未派彩",
   };
   const SETTLED_BET_STATES = ["Settled", "CashedOut", "Closed", "Won", "Lost", "Void", "Cancelled"];
+  const DATE_CHUNK_FETCH_DELAY_MIN_MS = 1000;
+  const DATE_CHUNK_FETCH_DELAY_MAX_MS = 2000;
+  const LINE_PURCHASE_URL = "https://lin.ee/zsGJ9oT";
+  const LINE_LOGO_RESOURCE = "assets/LINE_logo.svg.webp";
+  const LICENSE_DEVICE_ID_KEY = "slb_device_id";
+  const LICENSE_CODE_KEY = "slb_license_code";
+  const LICENSE_PAYLOAD_KEY = "slb_license_payload";
+  const LICENSE_CODE_PREFIX = "SLB1";
+  const FREE_MAX_LOOKBACK_DAYS = 365;
+  const PRO_MAX_LOOKBACK_DAYS = 730;
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const LICENSE_PUBLIC_JWK = {
+      kty: "EC",
+      crv: "P-256",
+      x: "oQxSKeY749vnhbNsCcb_Wz-STUATErKDJBXsaouM1ww",
+      y: "lty1AQ4XHSGcEF3eE3Oov8t35wXGXs1Kb7rP6kiDltE",
+      ext: true,
+  };
   let cachedApiHeaders = null;
   let cachedApiBaseUrl = null;
   let cachedApiQueryStr = null;
+  let activeFetchController = null;
+  let activeFetchRunId = "";
+  let parentFetchRunId = "";
+  let fetchRunCounter = 0;
   let autoCollectTriggered = false;
   let disclaimerAcceptedInThisPage = false;
   let disclaimerStorageLoaded = false;
+  let licenseDeviceId = "";
+  let licensePayload = null;
+  let licenseStateLoaded = false;
   const disclaimerStorageReady = loadDisclaimerAccepted();
+  const licenseStateReady = loadLicenseState();
 
   const TEXT = {
     win: "\u8d0f",
@@ -104,7 +130,7 @@
           if (location.href.includes("www-talo-ssb-pr") && await ensureDisclaimerStateLoaded()) {
               if (cachedApiBaseUrl && cachedApiHeaders) {
                   // Fetch the data
-                  fetchAndPostData(e.data.queryStr);
+                  fetchAndPostData(e.data.queryStr, e.data.fetchRunId);
               }
           }
       }
@@ -112,17 +138,31 @@
       // When the Parent Window receives the start signal
       if (e.data.type === 'SLB_FETCH_START') {
           if (!location.href.includes("my-bets")) return;
+          if (e.data.fetchRunId) parentFetchRunId = e.data.fetchRunId;
           showModal();
           if (!await ensureDisclaimerStateLoaded()) {
               showDisclaimerNotice();
               return;
           }
-          updateStatus("正在載入資料...");
+          updateStatus("");
+          updateProgress("");
+      }
+
+      if (e.data.type === 'SLB_FETCH_PROGRESS') {
+          if (!location.href.includes("my-bets")) return;
+          if (e.data.fetchRunId && parentFetchRunId && e.data.fetchRunId !== parentFetchRunId) return;
+          showModal();
+          if (!await ensureDisclaimerStateLoaded()) {
+              showDisclaimerNotice();
+              return;
+          }
+          updateProgressStage(`正在載入分段資料 ${e.data.current}/${e.data.total}（${e.data.fromDate} ~ ${e.data.toDate}）`);
       }
 
       // When the Parent Window receives the fetched data
       if (e.data.type === 'SLB_DATA_FETCHED') {
           if (!location.href.includes("my-bets")) return;
+          if (e.data.fetchRunId && parentFetchRunId && e.data.fetchRunId !== parentFetchRunId) return;
           showModal();
           if (!await ensureDisclaimerStateLoaded()) {
               showDisclaimerNotice();
@@ -138,10 +178,16 @@
               if (toEl) toEl.value = e.data.toStr.split('T')[0];
           }
 
-          updateStatus("資料拉取完成！正在渲染報表...");
           if (e.data.error) {
               updateStatus(`<span class="slb-error-text">API 錯誤: ${e.data.error}</span>`);
+              updateProgress("");
           } else {
+              if (e.data.partial) {
+                  updateProgressLoaded("");
+              } else {
+                  updateStatus("");
+                  updateProgress("");
+              }
               renderBets(e.data.bets);
           }
       }
@@ -165,6 +211,30 @@
       return chrome.storage.local;
   }
 
+  function storageGet(keys) {
+      const storage = getExtensionStorage();
+      if (!storage) return Promise.resolve({});
+      return new Promise((resolve) => {
+          storage.get(keys, (result) => resolve(result || {}));
+      });
+  }
+
+  function storageSet(values) {
+      const storage = getExtensionStorage();
+      if (!storage) return Promise.resolve();
+      return new Promise((resolve) => {
+          storage.set(values, () => resolve());
+      });
+  }
+
+  function storageRemove(keys) {
+      const storage = getExtensionStorage();
+      if (!storage) return Promise.resolve();
+      return new Promise((resolve) => {
+          storage.remove(keys, () => resolve());
+      });
+  }
+
   function loadDisclaimerAccepted() {
       return new Promise((resolve) => {
           const storage = getExtensionStorage();
@@ -179,6 +249,124 @@
               resolve(disclaimerAcceptedInThisPage);
           });
       });
+  }
+
+  function generateDeviceId() {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      return `SLB-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  }
+
+  async function getOrCreateDeviceId() {
+      const result = await storageGet([LICENSE_DEVICE_ID_KEY]);
+      if (typeof result[LICENSE_DEVICE_ID_KEY] === "string" && result[LICENSE_DEVICE_ID_KEY]) {
+          return result[LICENSE_DEVICE_ID_KEY];
+      }
+      const deviceId = generateDeviceId();
+      await storageSet({ [LICENSE_DEVICE_ID_KEY]: deviceId });
+      return deviceId;
+  }
+
+  function base64UrlToBytes(value) {
+      const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+  }
+
+  function bytesToText(bytes) {
+      return new TextDecoder().decode(bytes);
+  }
+
+  function getLicenseSigningBytes(payloadPart) {
+      return new TextEncoder().encode(`${LICENSE_CODE_PREFIX}.${payloadPart}`);
+  }
+
+  async function verifyLicenseCode(code, deviceId) {
+      const trimmedCode = String(code || "").trim();
+      const parts = trimmedCode.split(".");
+      if (parts.length !== 3 || parts[0] !== LICENSE_CODE_PREFIX) {
+          throw new Error("啟動碼格式不正確。");
+      }
+
+      let payload;
+      try {
+          payload = JSON.parse(bytesToText(base64UrlToBytes(parts[1])));
+      } catch (e) {
+          throw new Error("啟動碼內容無法讀取。");
+      }
+
+      if (!payload || payload.plan !== "pro") {
+          throw new Error("這組啟動碼不是 Pro 授權。");
+      }
+      if (payload.deviceId !== deviceId) {
+          throw new Error("啟動碼不屬於這台裝置。");
+      }
+
+      const publicKey = await crypto.subtle.importKey(
+          "jwk",
+          LICENSE_PUBLIC_JWK,
+          { name: "ECDSA", namedCurve: "P-256" },
+          false,
+          ["verify"]
+      );
+      const signatureOk = await crypto.subtle.verify(
+          { name: "ECDSA", hash: "SHA-256" },
+          publicKey,
+          base64UrlToBytes(parts[2]),
+          getLicenseSigningBytes(parts[1])
+      );
+      if (!signatureOk) {
+          throw new Error("啟動碼簽章驗證失敗。");
+      }
+
+      return payload;
+  }
+
+  async function loadLicenseState() {
+      try {
+          licenseDeviceId = await getOrCreateDeviceId();
+          const result = await storageGet([LICENSE_CODE_KEY, LICENSE_PAYLOAD_KEY]);
+          if (typeof result[LICENSE_CODE_KEY] === "string" && result[LICENSE_CODE_KEY]) {
+              licensePayload = await verifyLicenseCode(result[LICENSE_CODE_KEY], licenseDeviceId);
+              await storageSet({ [LICENSE_PAYLOAD_KEY]: licensePayload });
+          } else {
+              licensePayload = null;
+              await storageRemove([LICENSE_PAYLOAD_KEY]);
+          }
+      } catch (e) {
+          licensePayload = null;
+          await storageRemove([LICENSE_CODE_KEY, LICENSE_PAYLOAD_KEY]);
+      } finally {
+          licenseStateLoaded = true;
+          updateProUi();
+      }
+      return isProUnlocked();
+  }
+
+  async function ensureLicenseStateLoaded() {
+      if (!licenseStateLoaded) await licenseStateReady;
+      return isProUnlocked();
+  }
+
+  function isProUnlocked() {
+      return licensePayload?.plan === "pro" && licensePayload?.deviceId === licenseDeviceId;
+  }
+
+  async function activateLicenseCode(code) {
+      const deviceId = await getOrCreateDeviceId();
+      const payload = await verifyLicenseCode(code, deviceId);
+      licenseDeviceId = deviceId;
+      licensePayload = payload;
+      licenseStateLoaded = true;
+      await storageSet({
+          [LICENSE_DEVICE_ID_KEY]: deviceId,
+          [LICENSE_CODE_KEY]: String(code || "").trim(),
+          [LICENSE_PAYLOAD_KEY]: payload,
+      });
+      updateProUi();
+      return payload;
   }
 
   async function ensureDisclaimerStateLoaded() {
@@ -202,20 +390,124 @@
       });
   }
 
-  async function fetchAndPostData(queryStr) {
+  function isFetchCancelledError(error) {
+      return error?.name === "AbortError" || error?.message === "SLB_FETCH_CANCELLED";
+  }
+
+  async function fetchAndPostData(queryStr, requestedRunId) {
       if (!cachedApiBaseUrl || !cachedApiHeaders) return;
-      if (window.parent && window.parent !== window) {
-          window.parent.postMessage({ type: 'SLB_FETCH_START' }, '*');
+      const access = await getDateRangeAccess(queryStr);
+      if (!access.allowed) {
+          if (window.parent && window.parent !== window) {
+              window.parent.postMessage({ type: 'SLB_DATA_FETCHED', fetchRunId: requestedRunId, error: access.message }, '*');
+          }
+          return;
       }
-      const fetchResult = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, queryStr);
-      if (window.parent && window.parent !== window) {
-          window.parent.postMessage({
-              type: 'SLB_DATA_FETCHED',
-              bets: Array.from(fetchResult.bets.values()),
-              fromStr: fetchResult.fromStr,
-              toStr: fetchResult.toStr
-          }, '*');
+
+      if (activeFetchController) {
+          activeFetchController.abort();
       }
+
+      const fetchRunId = requestedRunId || `auto-${Date.now()}-${++fetchRunCounter}`;
+      const fetchController = new AbortController();
+      activeFetchController = fetchController;
+      activeFetchRunId = fetchRunId;
+
+      if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'SLB_FETCH_START', fetchRunId }, '*');
+      }
+
+      try {
+          const fetchResult = await fetchAllDataNatively(cachedApiBaseUrl, cachedApiHeaders, queryStr, {
+              fetchRunId,
+              signal: fetchController.signal
+          });
+          if (fetchController.signal.aborted || fetchRunId !== activeFetchRunId) return;
+          if (window.parent && window.parent !== window) {
+              window.parent.postMessage({
+                  type: 'SLB_DATA_FETCHED',
+                  fetchRunId,
+                  bets: Array.from(fetchResult.bets.values()),
+                  fromStr: fetchResult.fromStr,
+                  toStr: fetchResult.toStr
+              }, '*');
+          }
+      } catch (error) {
+          if (!isFetchCancelledError(error) && window.parent && window.parent !== window && fetchRunId === activeFetchRunId) {
+              window.parent.postMessage({ type: 'SLB_DATA_FETCHED', fetchRunId, error: error?.message || "Fetch failed" }, '*');
+          }
+      } finally {
+          if (fetchRunId === activeFetchRunId) {
+              activeFetchController = null;
+              activeFetchRunId = "";
+          }
+      }
+  }
+
+  function startOfLocalDay(value) {
+      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  function parseQueryDateRange(queryStr) {
+      if (!queryStr) return null;
+      try {
+          const params = new URLSearchParams(queryStr);
+          const from = params.get("from");
+          const to = params.get("to");
+          if (!from || !to) return null;
+          const fromDate = new Date(from);
+          const toDate = new Date(to);
+          if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return null;
+          return { fromDate, toDate };
+      } catch (e) {
+          return null;
+      }
+  }
+
+  function getOldestAllowedDate(days) {
+      const oldest = startOfLocalDay(new Date());
+      oldest.setDate(oldest.getDate() - days);
+      return oldest;
+  }
+
+  function getRangeDays(fromDate, toDate) {
+      return Math.floor((startOfLocalDay(toDate).getTime() - startOfLocalDay(fromDate).getTime()) / DAY_MS);
+  }
+
+  async function getDateRangeAccess(queryStr) {
+      const range = parseQueryDateRange(queryStr);
+      if (!range) return { allowed: true };
+      if (range.fromDate > range.toDate) {
+          return { allowed: false, type: "error", message: "查詢起日不可晚於迄日。" };
+      }
+
+      await ensureLicenseStateLoaded();
+      const pro = isProUnlocked();
+      const fromDay = startOfLocalDay(range.fromDate);
+      const rangeDays = getRangeDays(range.fromDate, range.toDate);
+      if (!pro) {
+          const freeOldest = getOldestAllowedDate(FREE_MAX_LOOKBACK_DAYS);
+          if (fromDay < freeOldest || rangeDays > FREE_MAX_LOOKBACK_DAYS) {
+              return {
+                  allowed: false,
+                  type: "pro",
+                  message: "查詢超過一年屬於 Pro 功能。升級後可查詢最近二年內投注資料。",
+              };
+          }
+      }
+
+      const proOldest = getOldestAllowedDate(PRO_MAX_LOOKBACK_DAYS);
+      if (fromDay < proOldest || rangeDays > PRO_MAX_LOOKBACK_DAYS) {
+          return { allowed: false, type: "error", message: "目前最多支援查詢最近二年內的投注資料。" };
+      }
+
+      return { allowed: true };
+  }
+
+  function setDateLimitError(message) {
+      showModal();
+      updateStatus(`<span class="slb-error-text">${message}</span>`);
+      updateProgress("");
   }
 
   function broadcastDisclaimerAccepted() {
@@ -453,9 +745,11 @@
       const overlay = document.getElementById("slb-modal-overlay");
       const miniBtn = document.getElementById("slb-minimized-btn");
       const themeSwitch = document.getElementById("slb-theme-switch");
+      const proPrompt = document.getElementById("slb-pro-prompt");
 
       if (overlay) overlay.dataset.theme = nextTheme;
       if (miniBtn) miniBtn.dataset.theme = nextTheme;
+      if (proPrompt) proPrompt.dataset.theme = nextTheme;
       if (themeSwitch) {
           const isLight = nextTheme === "light";
           themeSwitch.classList.toggle("light", isLight);
@@ -475,6 +769,7 @@
     style.id = "slb-modal-styles";
     style.textContent = `
       #slb-modal-overlay,
+      #slb-pro-prompt,
       #slb-minimized-btn {
         --slb-overlay: rgba(8,20,40,0.86);
         --slb-bg: #0f172a;
@@ -503,6 +798,7 @@
         color-scheme: dark;
       }
       #slb-modal-overlay[data-theme="light"],
+      #slb-pro-prompt[data-theme="light"],
       #slb-minimized-btn[data-theme="light"] {
         --slb-overlay: rgba(24,32,42,0.38);
         --slb-bg: #f7f8fa;
@@ -564,13 +860,66 @@
       .slb-report-toggle:hover {
         color: var(--slb-text);
       }
+      .slb-header-status {
+        flex: 1 1 280px;
+        min-width: 240px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
       .slb-report-panel {
         margin-top: 8px;
       }
       .slb-report-panel.collapsed {
         display: none;
       }
-      .slb-modal-subtitle { font-size: 14px; color: var(--slb-text-muted); margin-top: 4px; }
+      .slb-modal-subtitle {
+        min-height: 20px;
+        margin-top: 8px;
+        color: var(--slb-text-muted);
+        font-size: 14px;
+        line-height: 20px;
+      }
+      .slb-header-status .slb-modal-subtitle {
+        min-height: 18px;
+        margin: 0;
+        font-size: 13px;
+        line-height: 18px;
+      }
+      .slb-progress-text,
+      .slb-header-progress-text {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 18px;
+        margin: 0;
+        color: var(--slb-text-secondary);
+        font-size: 12px;
+        line-height: 18px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .slb-progress-text.is-visible,
+      .slb-header-progress-text.is-visible {
+        color: var(--slb-warning);
+      }
+      .slb-progress-stage,
+      .slb-header-progress-stage,
+      .slb-progress-loaded {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .slb-progress-stage,
+      .slb-header-progress-stage {
+        flex: 1 1 auto;
+      }
+      .slb-progress-loaded,
+      .slb-header-progress-loaded {
+        flex: 0 0 auto;
+        color: var(--slb-text-secondary);
+      }
       .slb-filter-row {
         margin-top: 8px; font-size: 14px; color: var(--slb-text-secondary);
         display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -642,14 +991,38 @@
       .slb-summary-success { color: var(--slb-success); }
       .slb-summary-danger { color: var(--slb-danger); }
       .slb-error-text { color: var(--slb-danger); }
+      .slb-license-status {
+        display: inline-flex; align-items: center; justify-content: center;
+        height: 24px; padding: 0 8px; border-radius: 9999px;
+        background: var(--slb-chip-bg); color: var(--slb-text-muted);
+        border: 1px solid var(--slb-border); font-size: 12px; font-weight: 800;
+      }
+      .slb-license-status.pro {
+        background: var(--slb-warning-soft); color: var(--slb-warning);
+        border-color: rgba(244,183,64,0.44);
+      }
       .slb-empty-state {
         grid-column: 1/-1; text-align: center; padding: 40px; color: var(--slb-text-muted);
       }
       .slb-date-shortcut {
+        position: relative;
         background: var(--slb-surface-alt); color: var(--slb-text-secondary);
         border: 1px solid var(--slb-border-strong); border-radius: 6px;
         height: 28px; padding: 0 9px; font-size: 13px; line-height: 26px;
         font-weight: 600; cursor: pointer;
+      }
+      .slb-date-shortcut-pro {
+        overflow: hidden;
+      }
+      .slb-pro-flag {
+        position: absolute; top: 0; right: 0;
+        width: 18px; height: 6px; padding: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: var(--slb-warning); color: #111827;
+        border-radius: 0 5px 0 3px;
+        font-size: 5px; line-height: 6px; font-weight: 900;
+        letter-spacing: 0;
+        pointer-events: none;
       }
       .slb-date-shortcut:hover {
         background: var(--slb-hover); color: var(--slb-text);
@@ -960,6 +1333,90 @@
       }
       #slb-minimized-btn:hover { transform: scale(1.05); }
       #slb-minimized-btn svg { width: 20px; height: 20px; color: var(--slb-primary); }
+      #slb-pro-prompt {
+        position: fixed; inset: 0; z-index: 1000000001;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--slb-overlay, rgba(8,20,40,0.86)); backdrop-filter: blur(5px);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: var(--slb-text, #f4f7fa);
+      }
+      .slb-pro-dialog {
+        position: relative;
+        width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto;
+        background: var(--slb-surface, #172033); color: var(--slb-text, #f4f7fa);
+        border: 1px solid var(--slb-border, #334155); border-radius: 8px;
+        box-shadow: var(--slb-shadow, 0 25px 50px -12px rgba(8,20,40,0.58)); padding: 22px;
+        padding-top: 24px;
+      }
+      .slb-pro-title {
+        margin: 0 40px 8px 0; font-size: 20px; font-weight: 800;
+      }
+      .slb-pro-close {
+        position: absolute; top: 12px; right: 12px;
+        width: 32px; height: 32px; border-radius: 6px;
+        display: inline-flex; align-items: center; justify-content: center;
+        background: transparent; color: var(--slb-text-muted);
+        border: 1px solid transparent; font-size: 22px; line-height: 1;
+        font-weight: 500; cursor: pointer;
+      }
+      .slb-pro-close:hover {
+        color: var(--slb-text); background: var(--slb-chip-bg);
+        border-color: var(--slb-border-strong);
+      }
+      .slb-pro-copy {
+        margin: 0 0 14px; color: var(--slb-text-secondary); font-size: 14px; line-height: 1.6;
+      }
+      .slb-pro-actions,
+      .slb-pro-field-row {
+        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      }
+      .slb-line-actions {
+        display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+      }
+      .slb-line-logo-link {
+        width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center;
+        border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.18);
+        background: #06c755; text-decoration: none;
+      }
+      .slb-line-logo {
+        width: 36px; height: 36px; display: block; object-fit: cover;
+      }
+      .slb-pro-device,
+      .slb-pro-license-input {
+        width: 100%; min-width: 0; box-sizing: border-box;
+        background: var(--slb-bg); color: var(--slb-text);
+        border: 1px solid var(--slb-border-strong); border-radius: 6px;
+        padding: 8px 10px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+      .slb-pro-device {
+        flex: 1 1 260px; width: auto;
+      }
+      .slb-pro-license-input {
+        min-height: 78px; resize: vertical;
+      }
+      .slb-pro-button,
+      .slb-pro-link {
+        display: inline-flex; align-items: center; justify-content: center;
+        height: 32px; padding: 0 12px; border-radius: 6px;
+        font-size: 13px; font-weight: 800; cursor: pointer; text-decoration: none;
+      }
+      .slb-pro-link,
+      .slb-pro-button.primary {
+        background: var(--slb-primary); color: #fff; border: 1px solid var(--slb-primary);
+      }
+      .slb-pro-button.secondary {
+        background: var(--slb-surface-alt); color: var(--slb-text);
+        border: 1px solid var(--slb-border-strong);
+      }
+      .slb-pro-button.copied {
+        background: var(--slb-success-soft); color: var(--slb-success);
+        border-color: var(--slb-success);
+      }
+      .slb-pro-status {
+        min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--slb-text-muted);
+      }
+      .slb-pro-status.success { color: var(--slb-success); }
+      .slb-pro-status.error { color: var(--slb-danger); }
     `;
     (document.head || document.documentElement).appendChild(style);
   }
@@ -980,6 +1437,7 @@
                         <div>
                             <div class="slb-title-row">
                                 <div class="slb-modal-title">自動統計報表</div>
+                                <span id="slb-license-status" class="slb-license-status">FREE</span>
                                 <label class="slb-auto-open-label">
                                     <input type="checkbox" id="slb-auto-open-cb" style="-webkit-appearance: checkbox !important; appearance: auto !important; display: inline-block !important; opacity: 1 !important; visibility: visible !important; position: static !important; width: 16px !important; height: 16px !important; margin: 0 !important; cursor: pointer !important;"> 切到我的投注時自動打開
                                 </label>
@@ -990,6 +1448,13 @@
                                     </button>
                                 </span>
                                 <div id="slb-report-toggle" class="slb-report-toggle" role="button" tabindex="0" aria-expanded="true" title="收合查詢、篩選與統計">摺疊▼</div>
+                                <div class="slb-header-status">
+                                    <div class="slb-modal-subtitle" id="slb-header-status-text"></div>
+                                    <div class="slb-header-progress-text" id="slb-header-progress-text" aria-live="polite">
+                                        <span class="slb-header-progress-stage" id="slb-header-progress-stage"></span>
+                                        <span class="slb-header-progress-loaded" id="slb-header-progress-loaded"></span>
+                                    </div>
+                                </div>
                             </div>
                             <div class="slb-disclaimer-line">${DISCLAIMER_TEXT}</div>
                             <div id="slb-report-panel" class="slb-report-panel">
@@ -999,7 +1464,11 @@
                                     <span>~</span>
                                     <input type="date" id="slb-date-to" class="slb-date-input">
                                     <button id="slb-date-search" class="slb-date-search-btn">搜尋</button>
-                                    <button id="slb-date-24h" class="slb-date-shortcut" style="margin-left:4px;">24小時</button>
+                                    <button id="slb-date-1h" class="slb-date-shortcut slb-date-shortcut-pro" style="margin-left:4px;">1小時<span class="slb-pro-flag">PRO</span></button>
+                                    <button id="slb-date-3h" class="slb-date-shortcut slb-date-shortcut-pro">3小時<span class="slb-pro-flag">PRO</span></button>
+                                    <button id="slb-date-6h" class="slb-date-shortcut slb-date-shortcut-pro">6小時<span class="slb-pro-flag">PRO</span></button>
+                                    <button id="slb-date-12h" class="slb-date-shortcut slb-date-shortcut-pro">12小時<span class="slb-pro-flag">PRO</span></button>
+                                    <button id="slb-date-24h" class="slb-date-shortcut">24小時</button>
                                     <button id="slb-date-7d" class="slb-date-shortcut">7天</button>
                                     <button id="slb-date-30d" class="slb-date-shortcut">30天</button>
                                 </div>
@@ -1015,7 +1484,7 @@
                                         <button type="button" class="slb-sport-filter-btn" data-payout="PENDING">未派彩</button>
                                     </div>
                                 </div>
-                                <div class="slb-modal-subtitle" id="slb-status-text" style="margin-top: 8px;">正在載入資料...</div>
+                                <div class="slb-modal-subtitle" id="slb-status-text"></div>
                             </div>
                         </div>
                         <div class="slb-header-github">
@@ -1037,7 +1506,7 @@
                     <div class="slb-modal-content" id="slb-modal-content">
                         <div class="slb-loading-container">
                             <div class="slb-spinner"></div>
-                            <div id="slb-loading-text">正在載入資料...</div>
+                            <div id="slb-loading-text">資料載入中...</div>
                         </div>
                     </div>
                 </div>
@@ -1124,6 +1593,7 @@
                 overlay.style.display = "flex";
             });
 
+            ensureLicenseStateLoaded().then(() => updateProUi());
             showDisclaimerNoticeIfNeeded();
             
             // Init date inputs
@@ -1145,8 +1615,18 @@
                     return;
                 }
 
-                const statusEl = document.getElementById("slb-status-text");
-                if(statusEl) statusEl.innerHTML = "正在拉取指定區間...";
+                const access = await getDateRangeAccess(queryStr);
+                if (!access.allowed) {
+                    if (access.type === "pro") showProPrompt(access.message);
+                    else setDateLimitError(access.message);
+                    return;
+                }
+
+                const fetchRunId = `manual-${Date.now()}-${++fetchRunCounter}`;
+                parentFetchRunId = fetchRunId;
+                const statusEl = document.getElementById("slb-header-status-text");
+                if(statusEl) statusEl.innerHTML = "";
+                updateProgress("");
 
                 const contentEl = document.getElementById("slb-modal-content");
                 if (contentEl) {
@@ -1164,6 +1644,7 @@
                 for (let i = 0; i < frames.length; i++) {
                     frames[i].contentWindow.postMessage({
                         type: 'SLB_FETCH_MANUAL',
+                        fetchRunId,
                         queryStr
                     }, '*');
                 }
@@ -1177,10 +1658,14 @@
                 await fetchManualQuery(`from=${fv}T00:00:00.000&to=${tv}T23:59:59.999`);
             });
 
-            const setupHourShortcutButton = (buttonId, hours) => {
+            const setupHourShortcutButton = (buttonId, hours, requiresPro = false) => {
                 const button = document.getElementById(buttonId);
                 if (!button) return;
                 button.addEventListener("click", async () => {
+                    if (requiresPro && !await ensureLicenseStateLoaded()) {
+                        showProPrompt(`${hours}小時快捷查詢屬於 Pro 功能。`);
+                        return;
+                    }
                     const now = new Date();
                     const past = new Date(now.getTime() - hours * 60 * 60 * 1000);
                     const fromEl = document.getElementById("slb-date-from");
@@ -1204,12 +1689,17 @@
                     document.getElementById("slb-date-search").click();
                 });
             };
+            setupHourShortcutButton("slb-date-1h", 1, true);
+            setupHourShortcutButton("slb-date-3h", 3, true);
+            setupHourShortcutButton("slb-date-6h", 6, true);
+            setupHourShortcutButton("slb-date-12h", 12, true);
             setupHourShortcutButton("slb-date-24h", 24);
             setupDateShortcutButton("slb-date-7d", 7);
             setupDateShortcutButton("slb-date-30d", 30);
         } else {
             applyTheme(getPreferredTheme());
             overlay.style.display = "flex";
+            ensureLicenseStateLoaded().then(() => updateProUi());
             showDisclaimerNoticeIfNeeded();
         }
     });
@@ -1231,7 +1721,7 @@
               </div>
           </div>
       `;
-      const statusEl = document.getElementById("slb-status-text");
+      const statusEl = document.getElementById("slb-header-status-text");
       if (statusEl) statusEl.textContent = "請先確認免責聲明後再使用報表功能。";
       const acceptBtn = document.getElementById("slb-accept-disclaimer-btn");
       if (acceptBtn) {
@@ -1250,10 +1740,165 @@
   }
 
   function updateStatus(text) {
-      const el = document.getElementById("slb-status-text");
+      const el = document.getElementById("slb-header-status-text");
       const lel = document.getElementById("slb-loading-text");
       if (el) el.innerHTML = text;
       if (lel) lel.innerHTML = text;
+  }
+
+  function updateProgress(text) {
+      updateProgressStage(text);
+      updateProgressLoaded("");
+  }
+
+  function updateProgressStage(text) {
+      const el = document.getElementById("slb-header-progress-stage");
+      if (el) el.textContent = text || "";
+      syncProgressVisibility();
+  }
+
+  function updateProgressLoaded(text) {
+      const el = document.getElementById("slb-header-progress-loaded");
+      if (el) el.textContent = text || "";
+      syncProgressVisibility();
+  }
+
+  function syncProgressVisibility() {
+      const container = document.getElementById("slb-header-progress-text");
+      if (!container) return;
+      const stageText = document.getElementById("slb-header-progress-stage")?.textContent || "";
+      const loadedText = document.getElementById("slb-header-progress-loaded")?.textContent || "";
+      container.classList.toggle("is-visible", Boolean(stageText || loadedText));
+  }
+
+  function setProPromptStatus(message, type = "") {
+      const statusEl = document.getElementById("slb-pro-status");
+      if (!statusEl) return;
+      statusEl.textContent = message || "";
+      statusEl.classList.toggle("success", type === "success");
+      statusEl.classList.toggle("error", type === "error");
+  }
+
+  function getLineLogoUrl() {
+      try {
+          if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
+              return chrome.runtime.getURL(LINE_LOGO_RESOURCE);
+          }
+      } catch (e) {}
+      return LINE_LOGO_RESOURCE;
+  }
+
+  function flashProCopyButton(button) {
+      if (!button) return;
+      const originalText = button.dataset.originalText || button.textContent || "複製裝置碼";
+      button.dataset.originalText = originalText;
+      button.textContent = "已複製";
+      button.classList.add("copied");
+      window.setTimeout(() => {
+          button.textContent = button.dataset.originalText || "複製裝置碼";
+          button.classList.remove("copied");
+      }, 1200);
+  }
+
+  function updateProUi() {
+      const statusEl = document.getElementById("slb-license-status");
+      const pro = isProUnlocked();
+      if (statusEl) {
+          statusEl.textContent = pro ? "PRO 已啟用" : "FREE";
+          statusEl.classList.toggle("pro", pro);
+      }
+
+      const deviceEl = document.getElementById("slb-pro-device-id");
+      if (deviceEl && licenseDeviceId) deviceEl.value = licenseDeviceId;
+
+      const activatedEl = document.getElementById("slb-pro-activated-note");
+      if (activatedEl) {
+          if (pro) {
+              activatedEl.textContent = `Pro 已啟用。授權：${licensePayload?.licenseId || "未命名"}`;
+          } else {
+              activatedEl.innerHTML = "目前為免費版。啟用 Pro 後可查詢最近二年，並使用 1/3/6/12 小時快捷查詢。<br>欲購買Pro版本請加入line好友並附上裝置碼";
+          }
+      }
+  }
+
+  function showProPrompt(reason = "此功能需要 Pro。") {
+      onReady(async () => {
+          ensureStyles();
+          await ensureLicenseStateLoaded();
+          const lineLogoUrl = getLineLogoUrl();
+
+          let promptEl = document.getElementById("slb-pro-prompt");
+          if (!promptEl) {
+              promptEl = document.createElement("div");
+              promptEl.id = "slb-pro-prompt";
+              promptEl.dataset.theme = getPreferredTheme();
+              promptEl.innerHTML = `
+                  <div class="slb-pro-dialog" role="dialog" aria-modal="true" aria-labelledby="slb-pro-title">
+                      <button type="button" class="slb-pro-close" id="slb-close-pro-prompt" aria-label="關閉 Pro 提示">X</button>
+                      <h3 class="slb-pro-title" id="slb-pro-title">升級 Pro</h3>
+                      <p class="slb-pro-copy" id="slb-pro-reason"></p>
+                      <div class="slb-line-actions">
+                          <a class="slb-line-logo-link" href="${LINE_PURCHASE_URL}" target="_blank" rel="noopener noreferrer" aria-label="加入 LINE 好友">
+                              <img class="slb-line-logo" src="${lineLogoUrl}" alt="LINE">
+                          </a>
+                          <a class="slb-pro-link" href="${LINE_PURCHASE_URL}" target="_blank" rel="noopener noreferrer">加入 LINE 好友</a>
+                      </div>
+                      <p class="slb-pro-copy" id="slb-pro-activated-note"></p>
+                      <div class="slb-pro-field-row" style="margin-bottom:12px;">
+                          <input class="slb-pro-device" id="slb-pro-device-id" type="text" readonly value="">
+                          <button type="button" class="slb-pro-button secondary" id="slb-copy-device-id">複製裝置碼</button>
+                      </div>
+                      <textarea class="slb-pro-license-input" id="slb-license-code-input" placeholder="貼上啟動序號，例如 SLB1.xxx.yyy"></textarea>
+                      <div class="slb-pro-actions" style="margin-top:10px;">
+                          <button type="button" class="slb-pro-button primary" id="slb-activate-license-btn">啟用 Pro</button>
+                      </div>
+                      <div class="slb-pro-status" id="slb-pro-status" aria-live="polite"></div>
+                  </div>
+              `;
+              document.body.appendChild(promptEl);
+
+              promptEl.addEventListener("click", (event) => {
+                  if (event.target === promptEl) promptEl.remove();
+              });
+
+              document.getElementById("slb-close-pro-prompt")?.addEventListener("click", () => {
+                  promptEl.remove();
+              });
+
+              document.getElementById("slb-copy-device-id")?.addEventListener("click", async () => {
+                  const button = document.getElementById("slb-copy-device-id");
+                  try {
+                      await copyTextToClipboard(licenseDeviceId);
+                      flashProCopyButton(button);
+                  } catch (e) {
+                      setProPromptStatus("複製失敗，請手動選取裝置碼。", "error");
+                  }
+              });
+
+              document.getElementById("slb-activate-license-btn")?.addEventListener("click", async () => {
+                  const inputEl = document.getElementById("slb-license-code-input");
+                  const code = inputEl?.value || "";
+                  try {
+                      setProPromptStatus("正在驗證啟動碼...");
+                      const payload = await activateLicenseCode(code);
+                      setProPromptStatus(`啟用成功。授權：${payload.licenseId || "未命名"}`, "success");
+                      if (inputEl) inputEl.value = "";
+                      updateProUi();
+                  } catch (e) {
+                      setProPromptStatus(e?.message || "啟動碼驗證失敗。", "error");
+                  }
+              });
+          } else {
+              promptEl.style.display = "flex";
+              promptEl.dataset.theme = getPreferredTheme();
+          }
+
+          const reasonEl = document.getElementById("slb-pro-reason");
+          if (reasonEl) reasonEl.textContent = reason;
+          updateProUi();
+          if (isProUnlocked()) setProPromptStatus("Pro 已啟用，可直接使用進階查詢。", "success");
+          else setProPromptStatus("請先複製裝置碼並透過 Line 取得啟動碼。");
+      });
   }
 
   async function copyTextToClipboard(text) {
@@ -1603,13 +2248,75 @@
   }
 
   // NATIVE FETCH INSIDE IFRAME (Same-Origin, NO CORS ERRORS!)
-  async function fetchAllDataNatively(baseUrl, headers, queryStr) {
+  async function fetchAllDataNatively(baseUrl, headers, queryStr, fetchOptions = {}) {
+      const { fetchRunId = "", signal = null } = fetchOptions;
       let finalBaseUrl = baseUrl;
       if (!finalBaseUrl.startsWith("http")) {
            finalBaseUrl = "https://www-talo-ssb-pr.sportslottery.com.tw" + (finalBaseUrl.startsWith('/') ? '' : '/') + finalBaseUrl;
       }
-      
+
       const localDatabase = new Map();
+
+      const formatLocal = (d) => {
+          const pad = n => n.toString().padStart(2, '0');
+          return d.getFullYear() + '-' +
+                 pad(d.getMonth() + 1) + '-' +
+                 pad(d.getDate()) + 'T' +
+                 pad(d.getHours()) + ':' +
+                 pad(d.getMinutes()) + ':' +
+                 pad(d.getSeconds()) + '.' +
+                 d.getMilliseconds().toString().padStart(3, '0');
+      };
+
+      const parseApiDate = (value) => {
+          const parsed = new Date(value);
+          return Number.isNaN(parsed.getTime()) ? null : parsed;
+      };
+
+      const formatDateOnly = (d) => formatLocal(d).split("T")[0];
+
+      const buildDateChunks = (start, end) => {
+          const chunks = [];
+          const maxRangeMs = 30 * 24 * 60 * 60 * 1000;
+          let cursor = new Date(end);
+
+          while (cursor >= start) {
+              const chunkStart = new Date(Math.max(cursor.getTime() - maxRangeMs + 1, start.getTime()));
+              chunks.push({
+                  from: formatLocal(chunkStart),
+                  to: formatLocal(cursor),
+                  fromDate: formatDateOnly(chunkStart),
+                  toDate: formatDateOnly(cursor)
+              });
+              cursor = new Date(chunkStart.getTime() - 1);
+          }
+
+          return chunks;
+      };
+
+      const throwIfCancelled = () => {
+          if (signal?.aborted || (fetchRunId && fetchRunId !== activeFetchRunId)) {
+              throw new Error("SLB_FETCH_CANCELLED");
+          }
+      };
+
+      const getDateChunkFetchDelayMs = () => {
+          const min = DATE_CHUNK_FETCH_DELAY_MIN_MS;
+          const max = DATE_CHUNK_FETCH_DELAY_MAX_MS;
+          return min + Math.floor(Math.random() * (max - min + 1));
+      };
+
+      const sleep = (ms) => new Promise((resolve, reject) => {
+          if (signal?.aborted) {
+              reject(new Error("SLB_FETCH_CANCELLED"));
+              return;
+          }
+          const timer = setTimeout(resolve, ms);
+          signal?.addEventListener("abort", () => {
+              clearTimeout(timer);
+              reject(new Error("SLB_FETCH_CANCELLED"));
+          }, { once: true });
+      });
 
       let fromStr, toStr;
       if (queryStr) {
@@ -1624,37 +2331,38 @@
           const today = new Date();
           const past30 = new Date();
           past30.setDate(today.getDate() - 30);
-          
-          function formatLocal(d) {
-              const pad = n => n.toString().padStart(2, '0');
-              return d.getFullYear() + '-' +
-                     pad(d.getMonth() + 1) + '-' +
-                     pad(d.getDate()) + 'T' +
-                     pad(d.getHours()) + ':' +
-                     pad(d.getMinutes()) + ':' +
-                     pad(d.getSeconds()) + '.' +
-                     d.getMilliseconds().toString().padStart(3, '0');
-          }
           fromStr = formatLocal(past30);
           toStr = formatLocal(today);
       }
-      
 
+      const requestedFromStr = fromStr;
+      const requestedToStr = toStr;
+      const requestedFromDate = parseApiDate(requestedFromStr);
+      const requestedToDate = parseApiDate(requestedToStr);
+      const dateChunks = requestedFromDate && requestedToDate && requestedFromDate <= requestedToDate
+          ? buildDateChunks(requestedFromDate, requestedToDate)
+          : [{
+              from: requestedFromStr,
+              to: requestedToStr,
+              fromDate: requestedFromStr.split("T")[0],
+              toDate: requestedToStr.split("T")[0]
+          }];
 
-      async function fetchState(betState) {
+      async function fetchState(betState, rangeFromStr, rangeToStr) {
           let pageNum = 0;
           let hasMore = true;
 
-          while (hasMore && pageNum < 10) {
+          while (hasMore && pageNum < 50) {
+              throwIfCancelled();
               const params = new URLSearchParams({
-                  from: fromStr,
-                  to: toStr,
+                  from: rangeFromStr,
+                  to: rangeToStr,
                   orderBy: 0,
                   pageNumber: pageNum,
                   pageSize: 50,
                   orderDesc: true
               });
-              
+
               if (betState === "Opened") {
                   params.append("betStateTypes", "Opened");
                   params.append("betOutcomes", "NotSpecified");
@@ -1663,18 +2371,17 @@
                   params.append("betOutcomes", "NotSpecified");
               }
 
-              // ensure + is not encoded or whatever, just standard URLSearchParams is fine.
               const targetUrl = finalBaseUrl + "?" + params.toString();
 
               try {
                   const resp = await window.fetch(targetUrl, {
                       method: "GET",
-                      headers: headers
+                      headers: headers,
+                      signal
                   });
 
                   if (!resp.ok) {
-                      if (window.parent) window.parent.postMessage({ type: 'SLB_DATA_FETCHED', error: `HTTP ${resp.status} - ${await resp.text()}` }, '*');
-                      break;
+                      throw new Error(`HTTP ${resp.status} - ${await resp.text()}`);
                   }
 
                   const text = await resp.text();
@@ -1734,19 +2441,51 @@
                       hasMore = false;
                   }
               } catch (e) {
-                  if (window.parent) window.parent.postMessage({ type: 'SLB_DATA_FETCHED', error: `Fetch failed: ${e.message}` }, '*');
-                  break;
+                  if (isFetchCancelledError(e) || signal?.aborted) throw new Error("SLB_FETCH_CANCELLED");
+                  throw new Error(`Fetch failed: ${e.message}`);
               }
           }
       }
 
-      await fetchState("Opened");
-      await fetchState("Settled");
-      
+      for (let index = 0; index < dateChunks.length; index++) {
+          throwIfCancelled();
+          const chunk = dateChunks[index];
+          if (window.parent) {
+              window.parent.postMessage({
+                  type: 'SLB_FETCH_PROGRESS',
+                  fetchRunId,
+                  current: index + 1,
+                  total: dateChunks.length,
+                  fromDate: chunk.fromDate,
+                  toDate: chunk.toDate
+              }, '*');
+          }
+          await fetchState("Opened", chunk.from, chunk.to);
+          await fetchState("Settled", chunk.from, chunk.to);
+          throwIfCancelled();
+          if (window.parent) {
+              window.parent.postMessage({
+                  type: 'SLB_DATA_FETCHED',
+                  fetchRunId,
+                  partial: true,
+                  current: index + 1,
+                  total: dateChunks.length,
+                  loadedCount: localDatabase.size,
+                  bets: Array.from(localDatabase.values()),
+                  fromStr: requestedFromStr,
+                  toStr: requestedToStr
+              }, '*');
+          }
+          if (index < dateChunks.length - 1) {
+              throwIfCancelled();
+              await sleep(getDateChunkFetchDelayMs());
+          }
+      }
+
       return {
           bets: localDatabase,
-          fromStr: fromStr,
-          toStr: toStr
+          fromStr: requestedFromStr,
+          toStr: requestedToStr
       };
   }
 })();

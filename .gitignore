@@ -1,3 +1,7 @@
 dist/
 __pycache__/
 *.pyc
+.env
+scripts/*.local.json
+scripts/*.private.json
+scripts/generate_license_code.mjs
