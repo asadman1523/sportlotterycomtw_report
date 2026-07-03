@@ -56,7 +56,7 @@ TRANSLATIONS = {
 
 
 def run_git(*args):
-    result = subprocess.run(["git", *args], check=True, text=True, capture_output=True)
+    result = subprocess.run(["git", *args], check=True, text=True, encoding="utf-8", capture_output=True)
     return result.stdout.strip()
 
 
@@ -81,6 +81,12 @@ def commit_lines(previous_tag, tag):
     return [line for line in output.splitlines() if line.strip()]
 
 
+def is_internal_agent_commit(commit):
+    output = run_git("diff-tree", "--no-commit-id", "--name-only", "-r", commit)
+    files = [line for line in output.splitlines() if line.strip()]
+    return files == ["AGENTS.md"]
+
+
 def bilingual_subject(subject):
     if " / " in subject:
         return subject
@@ -94,6 +100,8 @@ def release_body(previous_tag, tag):
     bullets = []
     for line in commit_lines(previous_tag, tag):
         commit, subject = line.split("\x1f", 1)
+        if is_internal_agent_commit(commit):
+            continue
         bullets.append(f"- {bilingual_subject(subject)} ({commit[:7]})")
 
     if not bullets:

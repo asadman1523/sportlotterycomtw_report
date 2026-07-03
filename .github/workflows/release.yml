@@ -30,10 +30,22 @@ jobs:
           {
             echo "## 這次更動"
             echo
+            wrote_note=false
             if [ -n "$previous_tag" ]; then
-              git log --pretty=format:'- %s (%h)' "$previous_tag"..HEAD
+              range="$previous_tag..HEAD"
             else
-              git log --pretty=format:'- %s (%h)' -n 10
+              range="-n 10"
+            fi
+            while IFS=$'\t' read -r hash subject; do
+              files="$(git diff-tree --no-commit-id --name-only -r "$hash")"
+              if [ "$files" = "AGENTS.md" ]; then
+                continue
+              fi
+              echo "- ${subject} (${hash:0:7})"
+              wrote_note=true
+            done < <(git log --pretty=format:'%H%x09%s' $range)
+            if [ "$wrote_note" = false ]; then
+              echo "- 無公開功能變更"
             fi
             echo
             echo
