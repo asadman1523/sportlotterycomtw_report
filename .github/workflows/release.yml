@@ -60,9 +60,11 @@ jobs:
           set -euo pipefail
           files=(
             manifest.json
+            background.js
             sportslottery-my-bets.user.js
             inject.js
             icon128.png
+            assets/LINE_logo.svg.webp
             README.md
             PRIVACY.md
           )
@@ -75,9 +77,40 @@ jobs:
         run: |
           set -euo pipefail
           unzip -l sportslottery-extension.zip
-          for file in manifest.json sportslottery-my-bets.user.js inject.js icon128.png README.md PRIVACY.md; do
+          for file in manifest.json background.js sportslottery-my-bets.user.js inject.js icon128.png assets/LINE_logo.svg.webp README.md PRIVACY.md; do
             unzip -Z1 sportslottery-extension.zip | grep -qx "$file"
           done
+          node <<'NODE'
+          const { execFileSync } = require("node:child_process");
+          const { readFileSync } = require("node:fs");
+
+          const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
+          const zipEntries = new Set(
+            execFileSync("unzip", ["-Z1", "sportslottery-extension.zip"], { encoding: "utf8" })
+              .split(/\r?\n/)
+              .filter(Boolean)
+          );
+          const required = new Set(["manifest.json"]);
+
+          for (const script of manifest.content_scripts || []) {
+            for (const js of script.js || []) required.add(js);
+            for (const css of script.css || []) required.add(css);
+          }
+          if (manifest.background?.service_worker) {
+            required.add(manifest.background.service_worker);
+          }
+          for (const icon of Object.values(manifest.icons || {})) {
+            required.add(icon);
+          }
+          for (const resourceGroup of manifest.web_accessible_resources || []) {
+            for (const resource of resourceGroup.resources || []) required.add(resource);
+          }
+
+          const missing = [...required].filter((file) => !zipEntries.has(file));
+          if (missing.length) {
+            throw new Error(`Extension package is missing manifest resources: ${missing.join(", ")}`);
+          }
+          NODE
         
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
