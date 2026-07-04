@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "運彩視覺化UI",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "description": "自動統計與彙整台灣運彩歷史投注報表",
   "permissions": [
     "storage",
