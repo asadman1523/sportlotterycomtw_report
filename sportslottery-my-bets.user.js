@@ -19,6 +19,40 @@
       SETTLED: "已派彩",
       PENDING: "未派彩",
   };
+  const BET_TYPE_PARLAY_COUNTS = {
+      singles: 1,
+      double: 2,
+      doubles: 2,
+      treble: 3,
+      trebles: 3,
+      "4-folds": 4,
+      "5-folds": 5,
+      "6-folds": 6,
+      "7-folds": 7,
+      "8-folds": 8,
+      "9-folds": 9,
+      "10-folds": 10,
+      "11-folds": 11,
+      "12-folds": 12,
+  };
+  const BET_TYPE_DISPLAY_LABELS = {
+      accumulator: "全部過關",
+      "全部過關": "全部過關",
+  };
+  const PARLAY_COUNT_LABELS = {
+      1: "一關",
+      2: "兩關",
+      3: "三關",
+      4: "四關",
+      5: "五關",
+      6: "六關",
+      7: "七關",
+      8: "八關",
+      9: "九關",
+      10: "十關",
+      11: "十一關",
+      12: "十二關",
+  };
   const SETTLED_BET_STATES = ["Settled", "CashedOut", "Closed", "Won", "Lost", "Void", "Cancelled"];
   const DATE_CHUNK_FETCH_DELAY_MIN_MS = 1000;
   const DATE_CHUNK_FETCH_DELAY_MAX_MS = 2000;
@@ -70,6 +104,8 @@
 
   window.slbSelectedSportTypes = window.slbSelectedSportTypes || [];
   window.slbSelectedPayoutStatuses = window.slbSelectedPayoutStatuses || [];
+  window.slbSelectedParlayCounts = window.slbSelectedParlayCounts || [];
+  window.slbSelectedParlayTypes = window.slbSelectedParlayTypes || [];
 
   // 1. Inject Interceptor into Main World
   function injectMainWorldScript() {
@@ -549,6 +585,84 @@
       return isSettledBet(bet) ? "SETTLED" : "PENDING";
   }
 
+  function parseChineseParlayCount(text) {
+      const digits = {
+          一: 1,
+          二: 2,
+          兩: 2,
+          三: 3,
+          四: 4,
+          五: 5,
+          六: 6,
+          七: 7,
+          八: 8,
+          九: 9,
+      };
+      if (!text) return null;
+      if (text === "十") return 10;
+      if (text.includes("十")) {
+          const [tenText, oneText] = text.split("十");
+          const tens = tenText ? digits[tenText] : 1;
+          const ones = oneText ? digits[oneText] : 0;
+          const count = tens * 10 + ones;
+          return Number.isFinite(count) && count > 0 ? count : null;
+      }
+      return digits[text] || null;
+  }
+
+  function getParlayCountFromTypeName(betTypeName) {
+      const typeName = String(betTypeName || "").trim();
+      const mappedCount = BET_TYPE_PARLAY_COUNTS[typeName.toLowerCase()];
+      if (mappedCount) return mappedCount;
+
+      const digitMatch = typeName.match(/(\d+)\s*關/);
+      if (digitMatch) {
+          const count = Number(digitMatch[1]);
+          if (Number.isFinite(count) && count > 0) return count;
+      }
+
+      const chineseMatch = typeName.match(/([一二兩三四五六七八九十]+)\s*關/);
+      const chineseCount = parseChineseParlayCount(chineseMatch?.[1] || "");
+      return chineseCount || null;
+  }
+
+  function isAccumulatorBetType(betTypeName) {
+      const typeName = String(betTypeName || "").trim();
+      return typeName.toLowerCase() === "accumulator" || typeName === "全部過關";
+  }
+
+  function getBetParlayCount(bet) {
+      if (isAccumulatorBetType(bet?.betTypeName)) return null;
+      return getParlayCountFromTypeName(bet?.betTypeName) || 1;
+  }
+
+  function formatParlayCountLabel(count) {
+      return PARLAY_COUNT_LABELS[count] || `${count}關`;
+  }
+
+  function getBetTypeNameDisplay(betTypeName) {
+      const mappedLabel = BET_TYPE_DISPLAY_LABELS[String(betTypeName || "").trim().toLowerCase()];
+      if (mappedLabel) return mappedLabel;
+
+      const count = getParlayCountFromTypeName(betTypeName);
+      if (count) return formatParlayCountLabel(count);
+      return String(betTypeName || "").trim() || "單場";
+  }
+
+  function getAvailableParlayCounts(bets) {
+      const counts = new Set();
+      (bets || []).forEach((bet) => {
+          counts.add(getBetParlayCount(bet));
+      });
+      return [...counts]
+          .filter((count) => Number.isFinite(count) && count > 0)
+          .sort((a, b) => a - b);
+  }
+
+  function hasAccumulatorBets(bets) {
+      return (bets || []).some((bet) => isAccumulatorBetType(bet?.betTypeName));
+  }
+
   function getLegStatusKey(leg) {
       const rawStatus = String(leg?.betLegStatus || "").trim().toLowerCase();
       const rawOutcome = String(leg?.winWLDOutcome || "").trim().toUpperCase();
@@ -572,6 +686,16 @@
       const selected = window.slbSelectedPayoutStatuses || [];
       if (selected.length === 0) return true;
       return selected.includes(getPayoutStatus(bet));
+  }
+
+  function betMatchesParlayCountFilter(bet) {
+      const selected = window.slbSelectedParlayCounts || [];
+      const selectedTypes = window.slbSelectedParlayTypes || [];
+      if (!isProUnlocked()) return true;
+      if (selectedTypes.includes("ACCUMULATOR")) return isAccumulatorBetType(bet?.betTypeName);
+      if (selected.length === 0) return true;
+      if (isAccumulatorBetType(bet?.betTypeName)) return false;
+      return selected.includes(getBetParlayCount(bet));
   }
 
   function getBetOddsValue(bet) {
@@ -603,11 +727,11 @@
   }
 
   function isMultiSingleBet(bet) {
-      return (bet.betTypeName || "").trim() === "一關" && Array.isArray(bet.legs) && bet.legs.length > 1;
+      return getParlayCountFromTypeName(bet?.betTypeName) === 1 && Array.isArray(bet.legs) && bet.legs.length > 1;
   }
 
   function getBetTypeDisplay(bet) {
-      const typeName = bet.betTypeName || "單場";
+      const typeName = getBetTypeNameDisplay(bet?.betTypeName);
       return isMultiSingleBet(bet) ? `${typeName} x${bet.legs.length}` : typeName;
   }
 
@@ -707,6 +831,64 @@
                   const currentSelected = window.slbSelectedPayoutStatuses || [];
                   window.slbSelectedPayoutStatuses = currentSelected.length === 1 && currentSelected[0] === status ? [] : [status];
               }
+              if (window.originalSLBBets) renderBets(window.originalSLBBets);
+          });
+      });
+  }
+
+  function updateParlayCountFilterControls() {
+      const optionsEl = document.getElementById("slb-parlay-count-filter-options");
+      if (!optionsEl) return;
+
+      const availableCounts = getAvailableParlayCounts(window.originalSLBBets || []);
+      const availableSet = new Set(availableCounts);
+      const hasAccumulator = hasAccumulatorBets(window.originalSLBBets || []);
+      const activeTypes = isProUnlocked() && hasAccumulator && (window.slbSelectedParlayTypes || []).includes("ACCUMULATOR") ? ["ACCUMULATOR"] : [];
+      const selectedCounts = isProUnlocked() ? (window.slbSelectedParlayCounts || []) : [];
+      const activeCounts = activeTypes.length > 0 ? [] : selectedCounts
+          .map((count) => Number(count))
+          .filter((count) => availableSet.has(count));
+      window.slbSelectedParlayTypes = activeTypes;
+      window.slbSelectedParlayCounts = activeCounts.length > 0 ? [activeCounts[0]] : [];
+
+      const activeSelected = new Set(window.slbSelectedParlayCounts);
+      const activeTypeSelected = new Set(window.slbSelectedParlayTypes);
+      const allActive = activeSelected.size === 0 && activeTypeSelected.size === 0;
+      const buttonsHtml = [
+          `<button type="button" class="slb-sport-filter-btn ${allActive ? "active" : ""}" data-parlay-count="ALL">全部</button>`,
+          hasAccumulator ? `<button type="button" class="slb-sport-filter-btn slb-date-shortcut-pro ${activeTypeSelected.has("ACCUMULATOR") ? "active" : ""}" data-parlay-type="ACCUMULATOR">全部過關<span class="slb-pro-flag">PRO</span></button>` : "",
+          ...availableCounts.map((count) =>
+              `<button type="button" class="slb-sport-filter-btn slb-date-shortcut-pro ${activeSelected.has(count) ? "active" : ""}" data-parlay-count="${count}">${formatParlayCountLabel(count)}<span class="slb-pro-flag">PRO</span></button>`
+          ),
+      ].join("");
+
+      optionsEl.innerHTML = buttonsHtml;
+      optionsEl.querySelectorAll(".slb-sport-filter-btn").forEach((button) => {
+          button.addEventListener("click", async () => {
+              const parlayCount = button.getAttribute("data-parlay-count");
+              const parlayType = button.getAttribute("data-parlay-type");
+              if (parlayCount === "ALL") {
+                  window.slbSelectedParlayCounts = [];
+                  window.slbSelectedParlayTypes = [];
+                  if (window.originalSLBBets) renderBets(window.originalSLBBets);
+                  return;
+              }
+
+              if (!await ensureLicenseStateLoaded()) {
+                  showProPrompt("過關數篩選屬於 Pro 功能。");
+                  return;
+              }
+              if (parlayType === "ACCUMULATOR") {
+                  const currentSelected = window.slbSelectedParlayTypes || [];
+                  window.slbSelectedParlayTypes = currentSelected.includes("ACCUMULATOR") ? [] : ["ACCUMULATOR"];
+                  window.slbSelectedParlayCounts = [];
+                  if (window.originalSLBBets) renderBets(window.originalSLBBets);
+                  return;
+              }
+              const count = Number(parlayCount);
+              const currentSelected = window.slbSelectedParlayCounts || [];
+              window.slbSelectedParlayCounts = currentSelected.length === 1 && currentSelected[0] === count ? [] : [count];
+              window.slbSelectedParlayTypes = [];
               if (window.originalSLBBets) renderBets(window.originalSLBBets);
           });
       });
@@ -931,6 +1113,7 @@
         display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       }
       .slb-sport-filter-btn {
+        position: relative;
         background: var(--slb-surface-alt); color: var(--slb-text-secondary); border: 1px solid var(--slb-border-strong);
         padding: 3px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
       }
@@ -1483,6 +1666,10 @@
                                         <button type="button" class="slb-sport-filter-btn" data-payout="SETTLED">已派彩</button>
                                         <button type="button" class="slb-sport-filter-btn" data-payout="PENDING">未派彩</button>
                                     </div>
+                                    <span class="slb-filter-inline-label">過關數：</span>
+                                    <div class="slb-sport-filter-options" id="slb-parlay-count-filter-options">
+                                        <button type="button" class="slb-sport-filter-btn active" data-parlay-count="ALL">全部</button>
+                                    </div>
                                 </div>
                                 <div class="slb-modal-subtitle" id="slb-status-text"></div>
                             </div>
@@ -1804,7 +1991,7 @@
       const statusEl = document.getElementById("slb-license-status");
       const pro = isProUnlocked();
       if (statusEl) {
-          statusEl.textContent = pro ? "PRO 已啟用" : "FREE";
+          statusEl.textContent = pro ? "Pro" : "FREE";
           statusEl.classList.toggle("pro", pro);
       }
 
@@ -1998,11 +2185,12 @@
       window.originalSLBBets = betsArray;
       updateSportFilterControls();
       updatePayoutFilterControls();
+      updateParlayCountFilterControls();
 
       window.slbSortCol = window.slbSortCol || 'date';
       if (window.slbSortDesc === undefined) window.slbSortDesc = true;
 
-      const filteredBets = [...betsArray].filter((bet) => betMatchesSportFilter(bet) && betMatchesPayoutFilter(bet));
+      const filteredBets = [...betsArray].filter((bet) => betMatchesSportFilter(bet) && betMatchesPayoutFilter(bet) && betMatchesParlayCountFilter(bet));
       const sortedBets = filteredBets.sort((a, b) => {
           let valA, valB;
           if (window.slbSortCol === 'date') {

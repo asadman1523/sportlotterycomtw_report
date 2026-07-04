@@ -2,9 +2,11 @@ const assert = require("node:assert/strict");
 const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const source = readFileSync(join(__dirname, "..", "sportslottery-my-bets.user.js"), "utf8");
 const manifestSource = readFileSync(join(__dirname, "..", "manifest.json"), "utf8");
+const parlayFixture = JSON.parse(readFileSync(join(__dirname, "fixtures", "parlay-filter-sample.json"), "utf8"));
 
 function cssBlock(selector) {
     const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -17,6 +19,51 @@ function buttonById(id) {
     const match = source.match(new RegExp(`<button id="${id}"[\\s\\S]*?</button>`));
     assert.ok(match, `Missing button #${id}`);
     return match[0];
+}
+
+function functionBlock(name) {
+    const start = source.indexOf(`function ${name}`);
+    assert.ok(start >= 0, `Missing function ${name}`);
+    const next = source.indexOf("\n  function ", start + name.length);
+    return source.slice(start, next === -1 ? source.length : next);
+}
+
+function constantObjectBlock(name) {
+    const match = source.match(new RegExp(`const ${name} = \\{[\\s\\S]*?\\n  \\};`));
+    assert.ok(match, `Missing constant ${name}`);
+    return match[0];
+}
+
+function parlayHelpers() {
+    return vm.runInNewContext([
+        constantObjectBlock("BET_TYPE_PARLAY_COUNTS"),
+        constantObjectBlock("BET_TYPE_DISPLAY_LABELS"),
+        constantObjectBlock("PARLAY_COUNT_LABELS"),
+        functionBlock("parseChineseParlayCount"),
+        functionBlock("getParlayCountFromTypeName"),
+        functionBlock("isAccumulatorBetType"),
+        functionBlock("getBetParlayCount"),
+        functionBlock("formatParlayCountLabel"),
+        functionBlock("getBetTypeNameDisplay"),
+        functionBlock("getAvailableParlayCounts"),
+        functionBlock("hasAccumulatorBets"),
+        "({ getBetParlayCount, getAvailableParlayCounts, getBetTypeNameDisplay, hasAccumulatorBets, isAccumulatorBetType })",
+    ].join("\n"));
+}
+
+function groupFixtureBets(rows) {
+    const grouped = new Map();
+    for (const row of rows) {
+        if (!grouped.has(row.fullExternalReference)) {
+            grouped.set(row.fullExternalReference, {
+                fullExternalReference: row.fullExternalReference,
+                betTypeName: row.betTypeName,
+                legs: [],
+            });
+        }
+        grouped.get(row.fullExternalReference).legs.push({ legOrder: row.legOrder });
+    }
+    return [...grouped.values()];
 }
 
 test("uses actual payout / net profit-loss label", () => {
@@ -110,6 +157,122 @@ test("pro flag is compact and stays inside pro shortcut buttons", () => {
     assert.doesNotMatch(block, /right:\s*-\d/);
 });
 
+test("parlay count filter is shown as a pro filter", () => {
+    assert.match(source, /window\.slbSelectedParlayCounts = window\.slbSelectedParlayCounts \|\| \[\];/);
+    assert.match(source, /window\.slbSelectedParlayTypes = window\.slbSelectedParlayTypes \|\| \[\];/);
+    assert.match(source, /<span class="slb-filter-inline-label">過關數：<\/span>/);
+    assert.doesNotMatch(source, /過關數：<span class="slb-filter-pro-flag">PRO<\/span>/);
+    assert.match(source, /id="slb-parlay-count-filter-options"/);
+    assert.match(source, /data-parlay-count="ALL">全部<\/button>/);
+    assert.match(source, /class="slb-sport-filter-btn slb-date-shortcut-pro \$\{activeTypeSelected\.has\("ACCUMULATOR"\) \? "active" : ""\}" data-parlay-type="ACCUMULATOR">全部過關<span class="slb-pro-flag">PRO<\/span><\/button>/);
+    assert.match(source, /\$\{formatParlayCountLabel\(count\)\}<span class="slb-pro-flag">PRO<\/span><\/button>/);
+    assert.doesNotMatch(source, /slb-filter-pro-flag/);
+    assert.match(cssBlock(".slb-sport-filter-btn"), /position:\s*relative;/);
+    assert.match(source, /updateParlayCountFilterControls\(\);[\s\S]*betMatchesParlayCountFilter\(bet\)/);
+});
+
+test("parlay count filter uses bet type name instead of leg count", () => {
+    const block = functionBlock("getParlayCountFromTypeName");
+    assert.match(block, /const typeName = String\(betTypeName \|\| ""\)\.trim\(\);/);
+    assert.match(block, /const mappedCount = BET_TYPE_PARLAY_COUNTS\[typeName\.toLowerCase\(\)\];/);
+    assert.match(block, /if \(mappedCount\) return mappedCount;/);
+    assert.match(block, /typeName\.match\(\/\(\\d\+\)\\s\*關\//);
+    assert.match(block, /typeName\.match\(\/\(\[一二兩三四五六七八九十\]\+\)\\s\*關\//);
+    assert.match(block, /return chineseCount \|\| null;/);
+    assert.doesNotMatch(block, /legs\.length/);
+    assert.match(source, /function getBetParlayCount\(bet\) \{[\s\S]*return getParlayCountFromTypeName\(bet\?\.betTypeName\) \|\| 1;/);
+    assert.match(source, /function isMultiSingleBet\(bet\) \{[\s\S]*getParlayCountFromTypeName\(bet\?\.betTypeName\) === 1/);
+    assert.match(source, /function getBetTypeDisplay\(bet\) \{[\s\S]*const typeName = getBetTypeNameDisplay\(bet\?\.betTypeName\);/);
+    assert.ok(source.includes('return PARLAY_COUNT_LABELS[count] || `${count}關`;'));
+});
+
+test("parlay labels use the official Chinese names", () => {
+    const expected = [
+        ["singles", 1, "一關"],
+        ["double", 2, "兩關"],
+        ["doubles", 2, "兩關"],
+        ["treble", 3, "三關"],
+        ["trebles", 3, "三關"],
+        ['"4-folds"', 4, "四關"],
+        ['"5-folds"', 5, "五關"],
+        ['"6-folds"', 6, "六關"],
+        ['"7-folds"', 7, "七關"],
+        ['"8-folds"', 8, "八關"],
+        ['"9-folds"', 9, "九關"],
+        ['"10-folds"', 10, "十關"],
+        ['"11-folds"', 11, "十一關"],
+        ['"12-folds"', 12, "十二關"],
+    ];
+
+    for (const [key, count, label] of expected) {
+        assert.match(source, new RegExp(`${key}:\\s*${count}`));
+        assert.match(source, new RegExp(`${count}:\\s*"${label}"`));
+    }
+});
+
+test("accumulator displays as all-pass and stays out of numeric parlay filters", () => {
+    assert.match(source, /const BET_TYPE_DISPLAY_LABELS = \{[\s\S]*accumulator:\s*"全部過關"[\s\S]*"全部過關":\s*"全部過關"/);
+    assert.match(source, /function isAccumulatorBetType\(betTypeName\) \{[\s\S]*typeName\.toLowerCase\(\) === "accumulator" \|\| typeName === "全部過關";/);
+    assert.match(source, /function hasAccumulatorBets\(bets\) \{[\s\S]*isAccumulatorBetType\(bet\?\.betTypeName\)/);
+    assert.match(
+        source,
+        /function getBetParlayCount\(bet\) \{[\s\S]*if \(isAccumulatorBetType\(bet\?\.betTypeName\)\) return null;[\s\S]*return getParlayCountFromTypeName\(bet\?\.betTypeName\) \|\| 1;/
+    );
+    assert.doesNotMatch(functionBlock("getBetParlayCount"), /legs\.length/);
+    assert.match(
+        source,
+        /function getBetTypeNameDisplay\(betTypeName\) \{[\s\S]*BET_TYPE_DISPLAY_LABELS\[String\(betTypeName \|\| ""\)\.trim\(\)\.toLowerCase\(\)\][\s\S]*if \(mappedLabel\) return mappedLabel;/
+    );
+    assert.match(
+        source,
+        /if \(selectedTypes\.includes\("ACCUMULATOR"\)\) return isAccumulatorBetType\(bet\?\.betTypeName\);/
+    );
+    assert.match(
+        source,
+        /if \(isAccumulatorBetType\(bet\?\.betTypeName\)\) return false;/
+    );
+});
+
+test("sample bet data keeps all-pass slips out of five/seven numeric filters", () => {
+    const helpers = parlayHelpers();
+    const bets = groupFixtureBets(parlayFixture);
+    const allPassBets = bets.filter((bet) => helpers.isAccumulatorBetType(bet.betTypeName));
+
+    assert.deepEqual(
+        allPassBets.map((bet) => [bet.fullExternalReference, bet.legs.length, helpers.getBetParlayCount(bet)]),
+        [
+            ["724/919", 5, null],
+            ["723/918", 7, null],
+        ]
+    );
+    assert.deepEqual([...helpers.getAvailableParlayCounts(bets)], [1, 2, 3]);
+    assert.equal(helpers.hasAccumulatorBets(bets), true);
+    assert.equal(helpers.getBetTypeNameDisplay("全部過關"), "全部過關");
+});
+
+test("free users are gated from parlay count filtering", () => {
+    const updateBlock = functionBlock("updateParlayCountFilterControls");
+    const clickBlock = updateBlock.slice(updateBlock.indexOf('button.addEventListener("click"'));
+    assert.match(
+        clickBlock,
+        /if \(parlayCount === "ALL"\) \{[\s\S]*window\.slbSelectedParlayCounts = \[\];[\s\S]*window\.slbSelectedParlayTypes = \[\];[\s\S]*return;[\s\S]*\}[\s\S]*if \(!await ensureLicenseStateLoaded\(\)\) \{[\s\S]*showProPrompt\("過關數篩選屬於 Pro 功能。"\);[\s\S]*return;[\s\S]*\}/
+    );
+    assert.match(
+        clickBlock,
+        /if \(parlayType === "ACCUMULATOR"\) \{[\s\S]*window\.slbSelectedParlayTypes = currentSelected\.includes\("ACCUMULATOR"\) \? \[\] : \["ACCUMULATOR"\];[\s\S]*window\.slbSelectedParlayCounts = \[\];/
+    );
+
+    const allIndex = clickBlock.indexOf('if (parlayCount === "ALL")');
+    const gateIndex = clickBlock.indexOf("if (!await ensureLicenseStateLoaded())");
+    const promptIndex = clickBlock.indexOf('showProPrompt("過關數篩選屬於 Pro 功能。")');
+    const nonAllStateUpdateIndex = clickBlock.indexOf("window.slbSelectedParlayCounts = currentSelected", gateIndex);
+    assert.ok(allIndex >= 0, "ALL should be handled separately");
+    assert.ok(gateIndex >= 0, "missing pro prompt gate");
+    assert.ok(gateIndex > allIndex, "ALL should not require pro access");
+    assert.ok(promptIndex > gateIndex, "free users should see a pro prompt for specific counts");
+    assert.ok(nonAllStateUpdateIndex > promptIndex, "specific count state should update only after pro access passes");
+});
+
 test("pro license state uses a local device-bound signed activation code", () => {
     assert.match(source, /const LINE_PURCHASE_URL = "https:\/\/lin\.ee\/zsGJ9oT";/);
     assert.match(source, /const LICENSE_DEVICE_ID_KEY = "slb_device_id";/);
@@ -126,6 +289,8 @@ test("pro license state uses a local device-bound signed activation code", () =>
     assert.match(source, /crypto\.subtle\.verify\([\s\S]*hash: "SHA-256"[\s\S]*getLicenseSigningBytes\(parts\[1\]\)/);
     assert.match(source, /await storageSet\(\{[\s\S]*\[LICENSE_CODE_KEY\]: String\(code \|\| ""\)\.trim\(\),[\s\S]*\[LICENSE_PAYLOAD_KEY\]: payload/);
     assert.doesNotMatch(source, /result\[LICENSE_PAYLOAD_KEY\]\?\.deviceId === licenseDeviceId/);
+    assert.match(source, /statusEl\.textContent = pro \? "Pro" : "FREE";/);
+    assert.doesNotMatch(source, /statusEl\.textContent = pro \? "PRO 已啟用" : "FREE";/);
 });
 
 test("free users are gated from pro shortcuts before manual fetch is posted", () => {
