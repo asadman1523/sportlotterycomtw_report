@@ -10,13 +10,13 @@ Last updated: July 4, 2026
 
 The extension reads betting history data that is already loaded in the user's browser on supported Taiwan Sports Lottery pages. This may include bet time, bet type, bet amount, payout amount, ticket or bet identifiers, bet status, and related match or selection details.
 
-For Pro activation, the extension creates and stores a random local device ID in the user's browser. If the user enters a Pro activation code, the extension stores that code and its verified license payload locally in the browser.
+For Pro activation, the extension reads the signed-in Chrome Google account email and account ID through Chrome's extension identity API. If the user enters a Pro activation code, the extension stores that code and its verified license payload locally in the browser and in Chrome extension sync storage when available.
 
 ## How Data Is Used
 
 The data is used only to generate local summaries, tables, sorting, and CSV export features in the user's browser.
 
-The local device ID is used only to verify that a Pro activation code belongs to the current browser installation.
+The Google account ID is used only to verify that a Pro activation code belongs to the current Chrome Google account. The email is used only for display and manual purchase confirmation.
 
 ## Data Storage and Sharing
 
@@ -24,7 +24,7 @@ The extension does not send betting data, browsing data, account data, or export
 
 The extension may store local display preferences, such as whether the report panel should open by default, in the user's browser local storage.
 
-When purchasing Pro, the user may voluntarily contact the developer through Line and provide the local device ID to receive an activation code. The extension does not automatically transmit betting history, account data, or exported files during this process.
+When purchasing Pro, the user may voluntarily contact the developer through Line and provide the copied Base64 authorization data, which includes the Google account ID and email, to receive an activation code. The extension does not automatically transmit betting history, account data, or exported files during this process.
 
 ## Third Parties
 

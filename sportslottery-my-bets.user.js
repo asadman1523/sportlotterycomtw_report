@@ -58,10 +58,15 @@
   const DATE_CHUNK_FETCH_DELAY_MAX_MS = 2000;
   const LINE_PURCHASE_URL = "https://lin.ee/zsGJ9oT";
   const LINE_LOGO_RESOURCE = "assets/LINE_logo.svg.webp";
-  const LICENSE_DEVICE_ID_KEY = "slb_device_id";
   const LICENSE_CODE_KEY = "slb_license_code";
   const LICENSE_PAYLOAD_KEY = "slb_license_payload";
-  const LICENSE_CODE_PREFIX = "SLB1";
+  const LICENSE_CODE_PREFIX = "SLB2";
+  const LICENSE_AUTH_REQUEST_PREFIX = "SLBAUTH2";
+  const LICENSE_AUTH_APP = "sportslottery_bet";
+  const LICENSE_AUTH_VERSION = 2;
+  const LICENSE_CHROME_LOGIN_MESSAGE = "請先登入 Chrome";
+  const LICENSE_SYNCING_MESSAGE = "正在同步授權...";
+  const LICENSE_SYNC_FAILED_MESSAGE = "Chrome 同步失敗，如果遺失啟動序號請洽 Line。";
   const FREE_MAX_LOOKBACK_DAYS = 365;
   const PRO_MAX_LOOKBACK_DAYS = 730;
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -82,9 +87,10 @@
   let autoCollectTriggered = false;
   let disclaimerAcceptedInThisPage = false;
   let disclaimerStorageLoaded = false;
-  let licenseDeviceId = "";
+  let licenseAccountInfo = null;
   let licensePayload = null;
   let licenseStateLoaded = false;
+  let licenseSyncStatus = "";
   const disclaimerStorageReady = loadDisclaimerAccepted();
   const licenseStateReady = loadLicenseState();
 
@@ -242,33 +248,84 @@
     return disclaimerAcceptedInThisPage;
   }
 
-  function getExtensionStorage() {
-      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) return null;
-      return chrome.storage.local;
+  function getExtensionStorage(area = "local") {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage[area]) return null;
+      return chrome.storage[area];
   }
 
-  function storageGet(keys) {
-      const storage = getExtensionStorage();
+  function storageGetFrom(area, keys) {
+      const storage = getExtensionStorage(area);
       if (!storage) return Promise.resolve({});
       return new Promise((resolve) => {
           storage.get(keys, (result) => resolve(result || {}));
       });
   }
 
-  function storageSet(values) {
-      const storage = getExtensionStorage();
-      if (!storage) return Promise.resolve();
+  function storageSetTo(area, values) {
+      const storage = getExtensionStorage(area);
+      if (!storage) return Promise.resolve({ ok: area !== "sync", error: "storage unavailable" });
       return new Promise((resolve) => {
-          storage.set(values, () => resolve());
+          storage.set(values, () => {
+              const error = chrome.runtime?.lastError;
+              resolve(error ? { ok: false, error: error.message } : { ok: true });
+          });
       });
   }
 
-  function storageRemove(keys) {
-      const storage = getExtensionStorage();
-      if (!storage) return Promise.resolve();
+  function storageRemoveFrom(area, keys) {
+      const storage = getExtensionStorage(area);
+      if (!storage) return Promise.resolve({ ok: area !== "sync", error: "storage unavailable" });
       return new Promise((resolve) => {
-          storage.remove(keys, () => resolve());
+          storage.remove(keys, () => {
+              const error = chrome.runtime?.lastError;
+              resolve(error ? { ok: false, error: error.message } : { ok: true });
+          });
       });
+  }
+
+  function storageGet(keys) {
+      return storageGetFrom("local", keys);
+  }
+
+  function storageSet(values) {
+      return storageSetTo("local", values);
+  }
+
+  function storageRemove(keys) {
+      return storageRemoveFrom("local", keys);
+  }
+
+  async function getStoredLicenseState() {
+      const keys = [LICENSE_CODE_KEY, LICENSE_PAYLOAD_KEY];
+      const localResult = await storageGetFrom("local", keys);
+      if (typeof localResult[LICENSE_CODE_KEY] === "string" && localResult[LICENSE_CODE_KEY]) {
+          return localResult;
+      }
+      licenseSyncStatus = LICENSE_SYNCING_MESSAGE;
+      updateProSyncStatus();
+      return storageGetFrom("sync", keys);
+  }
+
+  async function persistLicenseState(values) {
+      licenseSyncStatus = LICENSE_SYNCING_MESSAGE;
+      updateProSyncStatus();
+      const results = await Promise.all([
+          storageSetTo("local", values),
+          storageSetTo("sync", values),
+      ]);
+      const syncOk = results[1]?.ok !== false;
+      licenseSyncStatus = syncOk ? "" : LICENSE_SYNC_FAILED_MESSAGE;
+      updateProSyncStatus();
+  }
+
+  async function removeStoredLicenseState(keys) {
+      const results = await Promise.all([
+          storageRemoveFrom("local", keys),
+          storageRemoveFrom("sync", keys),
+      ]);
+      const syncOk = results[1]?.ok !== false;
+      licenseSyncStatus = syncOk ? "" : LICENSE_SYNC_FAILED_MESSAGE;
+      updateProSyncStatus();
   }
 
   function loadDisclaimerAccepted() {
@@ -287,22 +344,6 @@
       });
   }
 
-  function generateDeviceId() {
-      const bytes = new Uint8Array(16);
-      crypto.getRandomValues(bytes);
-      return `SLB-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
-  }
-
-  async function getOrCreateDeviceId() {
-      const result = await storageGet([LICENSE_DEVICE_ID_KEY]);
-      if (typeof result[LICENSE_DEVICE_ID_KEY] === "string" && result[LICENSE_DEVICE_ID_KEY]) {
-          return result[LICENSE_DEVICE_ID_KEY];
-      }
-      const deviceId = generateDeviceId();
-      await storageSet({ [LICENSE_DEVICE_ID_KEY]: deviceId });
-      return deviceId;
-  }
-
   function base64UrlToBytes(value) {
       const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
       const binary = atob(padded);
@@ -315,30 +356,69 @@
       return new TextDecoder().decode(bytes);
   }
 
+  function textToBase64Url(value) {
+      const bytes = new TextEncoder().encode(value);
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
   function getLicenseSigningBytes(payloadPart) {
       return new TextEncoder().encode(`${LICENSE_CODE_PREFIX}.${payloadPart}`);
   }
 
-  async function verifyLicenseCode(code, deviceId) {
+  function normalizeLicenseAccountInfo(response) {
+      const accountId = String(response?.accountId || "").trim();
+      if (!response?.ok || !accountId) return null;
+      return {
+          accountId,
+          email: String(response?.email || "").trim(),
+      };
+  }
+
+  async function requestChromeProfileUserInfo() {
+      if (typeof chrome === "undefined" || !chrome.runtime || !chrome.runtime.sendMessage) {
+          return { ok: false, error: LICENSE_CHROME_LOGIN_MESSAGE };
+      }
+      return new Promise((resolve) => {
+          try {
+              chrome.runtime.sendMessage({ type: "SLB_GET_PROFILE_USER_INFO" }, (response) => {
+                  const lastError = chrome.runtime.lastError;
+                  if (lastError) {
+                      resolve({ ok: false, error: lastError.message || LICENSE_CHROME_LOGIN_MESSAGE });
+                      return;
+                  }
+                  resolve(response || { ok: false, error: LICENSE_CHROME_LOGIN_MESSAGE });
+              });
+          } catch (e) {
+              resolve({ ok: false, error: LICENSE_CHROME_LOGIN_MESSAGE });
+          }
+      });
+  }
+
+  async function refreshLicenseAccountInfo() {
+      licenseAccountInfo = normalizeLicenseAccountInfo(await requestChromeProfileUserInfo());
+      return licenseAccountInfo;
+  }
+
+  function getLicenseAuthorizationText() {
+      if (!licenseAccountInfo?.accountId) return LICENSE_CHROME_LOGIN_MESSAGE;
+      const authorizationPayload = {
+          accountId: licenseAccountInfo.accountId,
+          email: licenseAccountInfo.email || "",
+          app: LICENSE_AUTH_APP,
+          licenseVersion: LICENSE_AUTH_VERSION,
+      };
+      return `${LICENSE_AUTH_REQUEST_PREFIX}.${textToBase64Url(JSON.stringify(authorizationPayload))}`;
+  }
+
+  async function verifyLicenseCode(code, accountId) {
       const trimmedCode = String(code || "").trim();
       const parts = trimmedCode.split(".");
       if (parts.length !== 3 || parts[0] !== LICENSE_CODE_PREFIX) {
           throw new Error("啟動碼格式不正確。");
       }
-
-      let payload;
-      try {
-          payload = JSON.parse(bytesToText(base64UrlToBytes(parts[1])));
-      } catch (e) {
-          throw new Error("啟動碼內容無法讀取。");
-      }
-
-      if (!payload || payload.plan !== "pro") {
-          throw new Error("這組啟動碼不是 Pro 授權。");
-      }
-      if (payload.deviceId !== deviceId) {
-          throw new Error("啟動碼不屬於這台裝置。");
-      }
+      if (!accountId) throw new Error(LICENSE_CHROME_LOGIN_MESSAGE);
 
       const publicKey = await crypto.subtle.importKey(
           "jwk",
@@ -357,23 +437,44 @@
           throw new Error("啟動碼簽章驗證失敗。");
       }
 
+      let payload;
+      try {
+          payload = JSON.parse(bytesToText(base64UrlToBytes(parts[1])));
+      } catch (e) {
+          throw new Error("啟動碼內容無法讀取。");
+      }
+
+      if (!payload || payload.version !== LICENSE_AUTH_VERSION || payload.plan !== "pro") {
+          throw new Error("這組啟動碼不是 Pro 授權。");
+      }
+      if (payload.accountId !== accountId) {
+          throw new Error("啟動碼不屬於這個 Google 帳號。");
+      }
+
       return payload;
   }
 
   async function loadLicenseState() {
       try {
-          licenseDeviceId = await getOrCreateDeviceId();
-          const result = await storageGet([LICENSE_CODE_KEY, LICENSE_PAYLOAD_KEY]);
-          if (typeof result[LICENSE_CODE_KEY] === "string" && result[LICENSE_CODE_KEY]) {
-              licensePayload = await verifyLicenseCode(result[LICENSE_CODE_KEY], licenseDeviceId);
-              await storageSet({ [LICENSE_PAYLOAD_KEY]: licensePayload });
+          await refreshLicenseAccountInfo();
+          const result = await getStoredLicenseState();
+          const savedCode = typeof result[LICENSE_CODE_KEY] === "string" ? result[LICENSE_CODE_KEY] : "";
+          if (savedCode && licenseAccountInfo?.accountId) {
+              licensePayload = await verifyLicenseCode(savedCode, licenseAccountInfo.accountId);
+              await persistLicenseState({
+                  [LICENSE_CODE_KEY]: savedCode,
+                  [LICENSE_PAYLOAD_KEY]: licensePayload,
+              });
+          } else if (savedCode) {
+              licensePayload = null;
+              await removeStoredLicenseState([LICENSE_PAYLOAD_KEY]);
           } else {
               licensePayload = null;
-              await storageRemove([LICENSE_PAYLOAD_KEY]);
+              await removeStoredLicenseState([LICENSE_PAYLOAD_KEY]);
           }
       } catch (e) {
           licensePayload = null;
-          await storageRemove([LICENSE_CODE_KEY, LICENSE_PAYLOAD_KEY]);
+          await removeStoredLicenseState([LICENSE_CODE_KEY, LICENSE_PAYLOAD_KEY]);
       } finally {
           licenseStateLoaded = true;
           updateProUi();
@@ -387,17 +488,16 @@
   }
 
   function isProUnlocked() {
-      return licensePayload?.plan === "pro" && licensePayload?.deviceId === licenseDeviceId;
+      return licensePayload?.plan === "pro" && licensePayload?.accountId === licenseAccountInfo?.accountId;
   }
 
   async function activateLicenseCode(code) {
-      const deviceId = await getOrCreateDeviceId();
-      const payload = await verifyLicenseCode(code, deviceId);
-      licenseDeviceId = deviceId;
+      await refreshLicenseAccountInfo();
+      if (!licenseAccountInfo?.accountId) throw new Error(LICENSE_CHROME_LOGIN_MESSAGE);
+      const payload = await verifyLicenseCode(code, licenseAccountInfo.accountId);
       licensePayload = payload;
       licenseStateLoaded = true;
-      await storageSet({
-          [LICENSE_DEVICE_ID_KEY]: deviceId,
+      await persistLicenseState({
           [LICENSE_CODE_KEY]: String(code || "").trim(),
           [LICENSE_PAYLOAD_KEY]: payload,
       });
@@ -1966,6 +2066,13 @@
       statusEl.classList.toggle("error", type === "error");
   }
 
+  function updateProSyncStatus() {
+      const syncEl = document.getElementById("slb-pro-sync-status");
+      if (!syncEl) return;
+      syncEl.textContent = licenseSyncStatus || "";
+      syncEl.classList.toggle("error", licenseSyncStatus === LICENSE_SYNC_FAILED_MESSAGE);
+  }
+
   function getLineLogoUrl() {
       try {
           if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
@@ -1996,22 +2103,23 @@
       }
 
       const deviceEl = document.getElementById("slb-pro-device-id");
-      if (deviceEl && licenseDeviceId) deviceEl.value = licenseDeviceId;
+      if (deviceEl) deviceEl.value = getLicenseAuthorizationText();
 
       const activatedEl = document.getElementById("slb-pro-activated-note");
       if (activatedEl) {
           if (pro) {
-              activatedEl.textContent = `Pro 已啟用。授權：${licensePayload?.licenseId || "未命名"}`;
+              activatedEl.textContent = `Pro 已啟用。授權：${licensePayload?.licenseId || licensePayload?.email || "未命名"}`;
           } else {
-              activatedEl.innerHTML = "目前為免費版。啟用 Pro 後可查詢最近二年，並使用 1/3/6/12 小時快捷查詢。<br>欲購買Pro版本請加入line好友並附上裝置碼";
+              activatedEl.textContent = "欲購買Pro版本請加入line好友並附上裝置碼";
           }
       }
+      updateProSyncStatus();
   }
 
   function showProPrompt(reason = "此功能需要 Pro。") {
       onReady(async () => {
           ensureStyles();
-          await ensureLicenseStateLoaded();
+          await loadLicenseState();
           const lineLogoUrl = getLineLogoUrl();
 
           let promptEl = document.getElementById("slb-pro-prompt");
@@ -2035,10 +2143,11 @@
                           <input class="slb-pro-device" id="slb-pro-device-id" type="text" readonly value="">
                           <button type="button" class="slb-pro-button secondary" id="slb-copy-device-id">複製裝置碼</button>
                       </div>
-                      <textarea class="slb-pro-license-input" id="slb-license-code-input" placeholder="貼上啟動序號，例如 SLB1.xxx.yyy"></textarea>
+                      <textarea class="slb-pro-license-input" id="slb-license-code-input" placeholder="貼上啟動序號，例如 SLB2.xxx.yyy"></textarea>
                       <div class="slb-pro-actions" style="margin-top:10px;">
                           <button type="button" class="slb-pro-button primary" id="slb-activate-license-btn">啟用 Pro</button>
                       </div>
+                      <div class="slb-pro-status" id="slb-pro-sync-status" aria-live="polite"></div>
                       <div class="slb-pro-status" id="slb-pro-status" aria-live="polite"></div>
                   </div>
               `;
@@ -2055,7 +2164,13 @@
               document.getElementById("slb-copy-device-id")?.addEventListener("click", async () => {
                   const button = document.getElementById("slb-copy-device-id");
                   try {
-                      await copyTextToClipboard(licenseDeviceId);
+                      await refreshLicenseAccountInfo();
+                      updateProUi();
+                      if (!licenseAccountInfo?.accountId) {
+                          setProPromptStatus(LICENSE_CHROME_LOGIN_MESSAGE, "error");
+                          return;
+                      }
+                      await copyTextToClipboard(getLicenseAuthorizationText());
                       flashProCopyButton(button);
                   } catch (e) {
                       setProPromptStatus("複製失敗，請手動選取裝置碼。", "error");
@@ -2067,6 +2182,8 @@
                   const code = inputEl?.value || "";
                   try {
                       setProPromptStatus("正在驗證啟動碼...");
+                      licenseSyncStatus = LICENSE_SYNCING_MESSAGE;
+                      updateProSyncStatus();
                       const payload = await activateLicenseCode(code);
                       setProPromptStatus(`啟用成功。授權：${payload.licenseId || "未命名"}`, "success");
                       if (inputEl) inputEl.value = "";
@@ -2084,6 +2201,7 @@
           if (reasonEl) reasonEl.textContent = reason;
           updateProUi();
           if (isProUnlocked()) setProPromptStatus("Pro 已啟用，可直接使用進階查詢。", "success");
+          else if (!licenseAccountInfo?.accountId) setProPromptStatus(LICENSE_CHROME_LOGIN_MESSAGE, "error");
           else setProPromptStatus("請先複製裝置碼並透過 Line 取得啟動碼。");
       });
   }

@@ -6,6 +6,8 @@ const vm = require("node:vm");
 
 const source = readFileSync(join(__dirname, "..", "sportslottery-my-bets.user.js"), "utf8");
 const manifestSource = readFileSync(join(__dirname, "..", "manifest.json"), "utf8");
+const manifest = JSON.parse(manifestSource);
+const backgroundSource = readFileSync(join(__dirname, "..", "background.js"), "utf8");
 const parlayFixture = JSON.parse(readFileSync(join(__dirname, "fixtures", "parlay-filter-sample.json"), "utf8"));
 
 function cssBlock(selector) {
@@ -273,24 +275,69 @@ test("free users are gated from parlay count filtering", () => {
     assert.ok(nonAllStateUpdateIndex > promptIndex, "specific count state should update only after pro access passes");
 });
 
-test("pro license state uses a local device-bound signed activation code", () => {
+test("manifest and background expose the Google account identity bridge", () => {
+    assert.ok(manifest.permissions.includes("identity"));
+    assert.ok(manifest.permissions.includes("identity.email"));
+    assert.equal(manifest.background.service_worker, "background.js");
+    assert.match(backgroundSource, /SLB_GET_PROFILE_USER_INFO/);
+    assert.match(backgroundSource, /chrome\.identity\.getProfileUserInfo\(\{ accountStatus: "ANY" \}/);
+    assert.match(backgroundSource, /const accountId = String\(profileInfo\?\.id \|\| ""\)\.trim\(\);/);
+    assert.match(backgroundSource, /sendResponse\(\{ ok: true, accountId, email \}\);/);
+    assert.match(backgroundSource, /請先登入 Chrome/);
+    assert.doesNotMatch(source, /chrome\.identity/);
+});
+
+test("pro license state uses a Google-account-bound SLB2 signed activation code", () => {
     assert.match(source, /const LINE_PURCHASE_URL = "https:\/\/lin\.ee\/zsGJ9oT";/);
-    assert.match(source, /const LICENSE_DEVICE_ID_KEY = "slb_device_id";/);
     assert.match(source, /const LICENSE_CODE_KEY = "slb_license_code";/);
     assert.match(source, /const LICENSE_PAYLOAD_KEY = "slb_license_payload";/);
-    assert.match(source, /const LICENSE_CODE_PREFIX = "SLB1";/);
+    assert.match(source, /const LICENSE_CODE_PREFIX = "SLB2";/);
+    assert.match(source, /const LICENSE_AUTH_REQUEST_PREFIX = "SLBAUTH2";/);
+    assert.match(source, /const LICENSE_AUTH_APP = "sportslottery_bet";/);
+    assert.match(source, /const LICENSE_AUTH_VERSION = 2;/);
+    assert.match(source, /const LICENSE_CHROME_LOGIN_MESSAGE = "請先登入 Chrome";/);
+    assert.match(source, /const LICENSE_SYNCING_MESSAGE = "正在同步授權\.\.\.";/);
+    assert.match(source, /const LICENSE_SYNC_FAILED_MESSAGE = "Chrome 同步失敗，如果遺失啟動序號請洽 Line。";/);
     assert.match(source, /const LICENSE_PUBLIC_JWK = \{[\s\S]*crv: "P-256"[\s\S]*x: "oQxSKeY749vnhbNsCcb_Wz-STUATErKDJBXsaouM1ww"[\s\S]*y: "lty1AQ4XHSGcEF3eE3Oov8t35wXGXs1Kb7rP6kiDltE"/);
-    assert.match(source, /return `SLB-\$\{Array\.from\(bytes/);
     assert.match(source, /function getLicenseSigningBytes\(payloadPart\) \{[\s\S]*`\$\{LICENSE_CODE_PREFIX\}\.\$\{payloadPart\}`/);
-    assert.match(source, /async function verifyLicenseCode\(code, deviceId\)/);
-    assert.match(source, /payload\.plan !== "pro"/);
-    assert.match(source, /payload\.deviceId !== deviceId/);
+    const encodeBlock = functionBlock("textToBase64Url");
+    assert.match(encodeBlock, /new TextEncoder\(\)\.encode\(value\)/);
+    assert.match(encodeBlock, /btoa\(binary\)/);
+    assert.match(encodeBlock, /replace\(\/\\\+\/g, "-"\)/);
+    assert.match(encodeBlock, /replace\(\/\\\/\/g, "_"\)/);
+    assert.match(encodeBlock, /replace\(\/=\+\$\/g, ""\)/);
+    assert.match(source, /async function verifyLicenseCode\(code, accountId\)/);
+    assert.match(source, /chrome\.runtime\.sendMessage\(\{ type: "SLB_GET_PROFILE_USER_INFO" \}/);
+    assert.match(source, /accountId:\s*licenseAccountInfo\.accountId/);
+    assert.match(source, /email:\s*licenseAccountInfo\.email \|\| ""/);
+    assert.match(source, /app:\s*LICENSE_AUTH_APP/);
+    assert.match(source, /licenseVersion:\s*LICENSE_AUTH_VERSION/);
+    assert.match(source, /payload\.version !== LICENSE_AUTH_VERSION \|\| payload\.plan !== "pro"/);
+    assert.match(source, /payload\.accountId !== accountId/);
     assert.match(source, /crypto\.subtle\.importKey\([\s\S]*"ECDSA"[\s\S]*namedCurve: "P-256"/);
     assert.match(source, /crypto\.subtle\.verify\([\s\S]*hash: "SHA-256"[\s\S]*getLicenseSigningBytes\(parts\[1\]\)/);
-    assert.match(source, /await storageSet\(\{[\s\S]*\[LICENSE_CODE_KEY\]: String\(code \|\| ""\)\.trim\(\),[\s\S]*\[LICENSE_PAYLOAD_KEY\]: payload/);
-    assert.doesNotMatch(source, /result\[LICENSE_PAYLOAD_KEY\]\?\.deviceId === licenseDeviceId/);
+    assert.match(source, /function getExtensionStorage\(area = "local"\)/);
+    assert.match(source, /function getStoredLicenseState\(\) \{[\s\S]*storageGetFrom\("local", keys\)[\s\S]*return storageGetFrom\("sync", keys\);/);
+    assert.match(source, /function persistLicenseState\(values\) \{[\s\S]*licenseSyncStatus = LICENSE_SYNCING_MESSAGE;[\s\S]*storageSetTo\("local", values\)[\s\S]*storageSetTo\("sync", values\)[\s\S]*licenseSyncStatus = syncOk \? "" : LICENSE_SYNC_FAILED_MESSAGE;/);
+    assert.match(source, /function removeStoredLicenseState\(keys\) \{[\s\S]*storageRemoveFrom\("local", keys\)[\s\S]*storageRemoveFrom\("sync", keys\)[\s\S]*licenseSyncStatus = syncOk \? "" : LICENSE_SYNC_FAILED_MESSAGE;/);
+    assert.match(source, /if \(!storage\) return Promise\.resolve\(\{ ok: area !== "sync", error: "storage unavailable" \}\);/);
+    assert.match(source, /await persistLicenseState\(\{[\s\S]*\[LICENSE_CODE_KEY\]: String\(code \|\| ""\)\.trim\(\),[\s\S]*\[LICENSE_PAYLOAD_KEY\]: payload/);
+    assert.match(source, /const result = await getStoredLicenseState\(\);/);
+    assert.match(source, /await persistLicenseState\(\{[\s\S]*\[LICENSE_CODE_KEY\]: savedCode,[\s\S]*\[LICENSE_PAYLOAD_KEY\]: licensePayload/);
+    assert.match(source, /return licensePayload\?\.plan === "pro" && licensePayload\?\.accountId === licenseAccountInfo\?\.accountId;/);
+    assert.doesNotMatch(source, /LICENSE_DEVICE_ID_KEY/);
+    assert.doesNotMatch(source, /slb_device_id/);
+    assert.doesNotMatch(source, /payload\.deviceId/);
+    assert.doesNotMatch(source, /licenseDeviceId/);
+    assert.doesNotMatch(source, /generateDeviceId/);
+    assert.doesNotMatch(source, /SLB1/);
     assert.match(source, /statusEl\.textContent = pro \? "Pro" : "FREE";/);
     assert.doesNotMatch(source, /statusEl\.textContent = pro \? "PRO 已啟用" : "FREE";/);
+
+    const verifyIndex = source.indexOf("const signatureOk = await crypto.subtle.verify");
+    const parseIndex = source.indexOf("payload = JSON.parse", verifyIndex);
+    assert.ok(verifyIndex > 0, "missing signature verification");
+    assert.ok(parseIndex > verifyIndex, "payload should be parsed only after signature verification");
 });
 
 test("free users are gated from pro shortcuts before manual fetch is posted", () => {
@@ -356,12 +403,29 @@ test("pro prompt shows purchase, device copy, and activation controls", () => {
     assert.doesNotMatch(source, /已複製本機裝置碼。/);
     assert.match(source, /id="slb-license-code-input"/);
     assert.match(source, /欲購買Pro版本請加入line好友並附上裝置碼/);
-    assert.match(source, /placeholder="貼上啟動序號，例如 SLB1\.xxx\.yyy"/);
+    assert.doesNotMatch(source, /啟用 Pro 後可查詢最近二年，並使用 1\/3\/6\/12 小時快捷查詢。/);
+    assert.doesNotMatch(source, /目前為免費版。啟用 Pro 後/);
+    assert.match(source, /placeholder="貼上啟動序號，例如 SLB2\.xxx\.yyy"/);
     assert.doesNotMatch(source, /placeholder="貼上啟動碼/);
     assert.match(source, /id="slb-activate-license-btn"/);
-    assert.match(source, /await copyTextToClipboard\(licenseDeviceId\)/);
+    assert.match(source, /await copyTextToClipboard\(getLicenseAuthorizationText\(\)\)/);
     assert.match(source, /const payload = await activateLicenseCode\(code\);/);
     assert.match(source, /啟用成功。授權：/);
+    assert.match(source, /id="slb-pro-sync-status"/);
+    assert.match(source, /function updateProSyncStatus\(\) \{[\s\S]*document\.getElementById\("slb-pro-sync-status"\)[\s\S]*syncEl\.textContent = licenseSyncStatus \|\| "";[\s\S]*syncEl\.classList\.toggle\("error", licenseSyncStatus === LICENSE_SYNC_FAILED_MESSAGE\);/);
+    assert.match(source, /licenseSyncStatus = LICENSE_SYNCING_MESSAGE;[\s\S]*updateProSyncStatus\(\);[\s\S]*const payload = await activateLicenseCode\(code\);/);
+    assert.match(source, /setProPromptStatus\(LICENSE_CHROME_LOGIN_MESSAGE, "error"\);/);
+
+    const authBlock = functionBlock("getLicenseAuthorizationText");
+    assert.match(authBlock, /return LICENSE_CHROME_LOGIN_MESSAGE;/);
+    assert.match(authBlock, /const authorizationPayload = \{/);
+    assert.match(authBlock, /accountId:\s*licenseAccountInfo\.accountId/);
+    assert.match(authBlock, /email:\s*licenseAccountInfo\.email \|\| ""/);
+    assert.match(authBlock, /app:\s*LICENSE_AUTH_APP/);
+    assert.match(authBlock, /licenseVersion:\s*LICENSE_AUTH_VERSION/);
+    assert.match(authBlock, /return `\$\{LICENSE_AUTH_REQUEST_PREFIX\}\.\$\{textToBase64Url\(JSON\.stringify\(authorizationPayload\)\)\}`;/);
+    assert.doesNotMatch(authBlock, /return JSON\.stringify/);
+    assert.doesNotMatch(authBlock, /deviceId/);
 });
 
 test("line logo asset is bundled for the pro prompt", () => {
