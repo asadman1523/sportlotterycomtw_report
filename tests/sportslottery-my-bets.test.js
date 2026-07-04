@@ -68,6 +68,14 @@ function groupFixtureBets(rows) {
     return [...grouped.values()];
 }
 
+function eventStartTimeHelpers() {
+    return vm.runInNewContext([
+        functionBlock("getTimeSortValue"),
+        functionBlock("getEarlierTimeValue"),
+        "({ getTimeSortValue, getEarlierTimeValue })",
+    ].join("\n"));
+}
+
 test("uses actual payout / net profit-loss label", () => {
     assert.match(source, /實際派彩\/淨損益/);
     assert.doesNotMatch(source, /預計\/實際派彩/);
@@ -157,6 +165,42 @@ test("pro flag is compact and stays inside pro shortcut buttons", () => {
     assert.doesNotMatch(cssBlock(".slb-date-shortcut-pro"), /padding-right/);
     assert.doesNotMatch(block, /top:\s*-\d/);
     assert.doesNotMatch(block, /right:\s*-\d/);
+});
+
+test("event start time column appears after bet time with a pro sort flag", () => {
+    assert.match(
+        source,
+        /<th data-sort="date"[\s\S]*>下注時間 \$\{getSortIcon\('date'\)\}<\/th>\s*<th data-sort="eventStart" class="slb-pro-sort-head"[\s\S]*>開賽時間 <span class="slb-pro-flag slb-sort-pro-flag">PRO<\/span> \$\{getSortIcon\('eventStart'\)\}<\/th>\s*<th data-sort="type"/
+    );
+    assert.match(cssBlock(".slb-sort-pro-flag"), /position:\s*static;/);
+    assert.match(cssBlock(".slb-sort-pro-flag"), /height:\s*12px;/);
+    assert.match(source, /<td class="slb-date">\$\{createdDate\}<\/td>\s*<td class="slb-date">\$\{eventStartTime\}<\/td>\s*<td class="slb-type">/);
+});
+
+test("event start time is included in CSV export and row copy text", () => {
+    assert.match(source, /投注代碼,投注 ID,下注時間,開賽時間,玩法,投注內容,投注額,賠率,實際派彩\/淨損益,狀態\\n/);
+    assert.match(source, /const eventStartTime = formatBetDateTime\(b\.eventStartTime\);/);
+    assert.match(source, /csvContent \+= `"\$\{b\.ticketId \|\| ''\}","\$\{b\.id \|\| ''\}",\$\{createdDate\},\$\{eventStartTime\},\$\{getBetTypeDisplay\(b\)\}/);
+    assert.match(
+        source,
+        /const rowCopyText = \[\s*createdDate,\s*eventStartTime,\s*getBetTypeDisplay\(b\),/
+    );
+});
+
+test("free users are gated from sorting by event start time only", () => {
+    const renderBlock = functionBlock("renderBets");
+    const clickBlock = renderBlock.slice(renderBlock.indexOf("container.querySelectorAll('th[data-sort]')"));
+    assert.match(
+        clickBlock,
+        /th\.addEventListener\('click', async \(\) => \{[\s\S]*const col = th\.getAttribute\('data-sort'\);[\s\S]*if \(col === "eventStart" && !await ensureLicenseStateLoaded\(\)\) \{[\s\S]*showProPrompt\("開賽時間排序屬於 Pro 功能。"\);[\s\S]*return;[\s\S]*\}[\s\S]*if \(window\.slbSortCol === col\)/
+    );
+    const gateIndex = clickBlock.indexOf('if (col === "eventStart" && !await ensureLicenseStateLoaded())');
+    const promptIndex = clickBlock.indexOf('showProPrompt("開賽時間排序屬於 Pro 功能。")');
+    const sortUpdateIndex = clickBlock.indexOf("if (window.slbSortCol === col)");
+    assert.ok(gateIndex >= 0, "missing event start pro gate");
+    assert.ok(promptIndex > gateIndex, "free users should see a pro prompt");
+    assert.ok(sortUpdateIndex > promptIndex, "sort state should update only after the pro gate passes");
+    assert.doesNotMatch(clickBlock, /col !== "eventStart"[\s\S]*ensureLicenseStateLoaded/);
 });
 
 test("parlay count filter is shown as a pro filter", () => {
@@ -480,6 +524,26 @@ test("loaded chunks are rendered before the full search completes", () => {
     assert.doesNotMatch(source, /updateStatus\(`已先顯示目前載入資料/);
     assert.doesNotMatch(source, /updateStatus\(`正在載入分段資料/);
     assert.match(source, /renderBets\(e\.data\.bets\);/);
+});
+
+test("event start time is stored on bets and legs", () => {
+    assert.match(source, /eventStartTime:\s*item\.tsEventTime \|\| null/);
+    assert.match(source, /savedBet\.eventStartTime = getEarlierTimeValue\(savedBet\.eventStartTime, item\.tsEventTime\);/);
+    assert.match(source, /savedBet\.legs\.push\(\{[\s\S]*eventStartTime:\s*item\.tsEventTime \|\| null[\s\S]*eventResult:\s*item\.eventResult/);
+});
+
+test("multi-leg event start time uses the earliest valid leg time", () => {
+    const helpers = eventStartTimeHelpers();
+    assert.equal(
+        helpers.getEarlierTimeValue("2026-07-04 10:30:00", "2026-07-04 09:30:00"),
+        "2026-07-04 09:30:00"
+    );
+    assert.equal(
+        helpers.getEarlierTimeValue("2026-07-04 09:30:00", "2026-07-04 10:30:00"),
+        "2026-07-04 09:30:00"
+    );
+    assert.equal(helpers.getEarlierTimeValue(null, "2026-07-04 09:30:00"), "2026-07-04 09:30:00");
+    assert.equal(helpers.getEarlierTimeValue("2026-07-04 09:30:00", null), "2026-07-04 09:30:00");
 });
 
 test("unsettled bets do not show potential return as actual payout", () => {

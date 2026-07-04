@@ -826,6 +826,29 @@
       return Number.isFinite(odds) && odds > 0 ? odds : null;
   }
 
+  function getTimeSortValue(value) {
+      if (!value) return null;
+      const parsed = new Date(String(value).replace(' ', 'T')).getTime();
+      return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  function getEarlierTimeValue(current, candidate) {
+      const candidateSortValue = getTimeSortValue(candidate);
+      if (candidateSortValue === null) return current || null;
+      const currentSortValue = getTimeSortValue(current);
+      if (currentSortValue === null || candidateSortValue < currentSortValue) return candidate;
+      return current;
+  }
+
+  function formatBetDateTime(value) {
+      const sortValue = getTimeSortValue(value);
+      if (sortValue === null) return "-";
+      return new Date(sortValue).toLocaleString('zh-TW', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit'
+      });
+  }
+
   function isMultiSingleBet(bet) {
       return getParlayCountFromTypeName(bet?.betTypeName) === 1 && Array.isArray(bet.legs) && bet.legs.length > 1;
   }
@@ -1306,6 +1329,10 @@
         font-size: 5px; line-height: 6px; font-weight: 900;
         letter-spacing: 0;
         pointer-events: none;
+      }
+      .slb-sort-pro-flag {
+        position: static; width: auto; height: 12px; padding: 0 4px; margin-left: 4px;
+        border-radius: 3px; font-size: 8px; line-height: 12px; vertical-align: middle;
       }
       .slb-date-shortcut:hover {
         background: var(--slb-hover); color: var(--slb-text);
@@ -2249,19 +2276,11 @@
       }
       
       let csvContent = "\uFEFF"; // BOM for UTF-8 Excel compatibility
-      csvContent += "投注代碼,投注 ID,下注時間,玩法,投注內容,投注額,賠率,實際派彩/淨損益,狀態\n";
+      csvContent += "投注代碼,投注 ID,下注時間,開賽時間,玩法,投注內容,投注額,賠率,實際派彩/淨損益,狀態\n";
       
       window.currentSLBBets.forEach(b => {
-          let createdDate = b.createdDate || "Invalid Date";
-          if (createdDate !== "Invalid Date") {
-              const d = new Date(createdDate.replace(' ', 'T'));
-              if (!isNaN(d.getTime())) {
-                  createdDate = d.toLocaleString('zh-TW', {
-                      year: 'numeric', month: '2-digit', day: '2-digit', 
-                      hour: '2-digit', minute: '2-digit'
-                  });
-              }
-          }
+          const createdDate = formatBetDateTime(b.createdDate);
+          const eventStartTime = formatBetDateTime(b.eventStartTime);
           
           let legTexts = b.legs ? b.legs.map(leg => {
               const legOdds = getLegOddsValue(leg);
@@ -2283,7 +2302,7 @@
                stateText = "未派彩";
           }
           
-          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${getBetTypeDisplay(b)},${contentText},${b.totalStake},${displayOdds},"${getReturnProfitText(b)}",${stateText}\n`;
+          csvContent += `"${b.ticketId || ''}","${b.id || ''}",${createdDate},${eventStartTime},${getBetTypeDisplay(b)},${contentText},${b.totalStake},${displayOdds},"${getReturnProfitText(b)}",${stateText}\n`;
       });
       
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -2312,8 +2331,14 @@
       const sortedBets = filteredBets.sort((a, b) => {
           let valA, valB;
           if (window.slbSortCol === 'date') {
-              valA = new Date((a.createdDate || "").replace(' ', 'T')).getTime() || 0;
-              valB = new Date((b.createdDate || "").replace(' ', 'T')).getTime() || 0;
+              valA = getTimeSortValue(a.createdDate) || 0;
+              valB = getTimeSortValue(b.createdDate) || 0;
+          } else if (window.slbSortCol === 'eventStart') {
+              valA = getTimeSortValue(a.eventStartTime);
+              valB = getTimeSortValue(b.eventStartTime);
+              if (valA === null && valB === null) return 0;
+              if (valA === null) return 1;
+              if (valB === null) return -1;
           } else if (window.slbSortCol === 'type') {
               valA = a.betTypeName || "單場";
               valB = b.betTypeName || "單場";
@@ -2362,6 +2387,7 @@
               <thead>
                   <tr>
                       <th data-sort="date" style="cursor:pointer; user-select:none;" title="點擊排序">下注時間 ${getSortIcon('date')}</th>
+                      <th data-sort="eventStart" class="slb-pro-sort-head" style="cursor:pointer; user-select:none;" title="點擊排序">開賽時間 <span class="slb-pro-flag slb-sort-pro-flag">PRO</span> ${getSortIcon('eventStart')}</th>
                       <th data-sort="type" style="cursor:pointer; user-select:none;" title="點擊排序">玩法 ${getSortIcon('type')}</th>
                       <th>投注內容</th>
                       <th data-sort="stake" style="cursor:pointer; user-select:none;" title="點擊排序">投注額 ${getSortIcon('stake')}</th>
@@ -2407,15 +2433,8 @@
               pendingStake += (b.totalStake || 0);
           }
 
-          let createdDate = b.createdDate || "Invalid Date";
-          if (createdDate !== "Invalid Date") {
-              const d = new Date(createdDate.replace(' ', 'T'));
-              if (!isNaN(d.getTime())) {
-                  createdDate = d.toLocaleString('zh-TW', {
-                      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
-                  });
-              }
-          }
+          const createdDate = formatBetDateTime(b.createdDate);
+          const eventStartTime = formatBetDateTime(b.eventStartTime);
 
           const escapeHTML = (str) => {
               return String(str).replace(/&/g, "&amp;")
@@ -2466,6 +2485,7 @@
 
           const rowCopyText = [
               createdDate,
+              eventStartTime,
               getBetTypeDisplay(b),
               rowContentText,
               `NT$ ${b.totalStake || 0}`,
@@ -2480,6 +2500,7 @@
           tableHtml += `
               <tr class="slb-row" style="cursor:pointer; transition: background 0.2s;" onclick="const c = this.querySelector('.slb-content'); if(c) c.classList.toggle('expanded');">
                   <td class="slb-date">${createdDate}</td>
+                  <td class="slb-date">${eventStartTime}</td>
                   <td class="slb-type">${escapeHTML(getBetTypeDisplay(b))}</td>
                   <td class="slb-content" title="${fullContentText}" onclick="event.stopPropagation(); this.classList.toggle('expanded');">${contentText}</td>
                   <td class="slb-amount">NT$ ${b.totalStake}</td>
@@ -2525,8 +2546,12 @@
       }
 
       container.querySelectorAll('th[data-sort]').forEach(th => {
-          th.addEventListener('click', () => {
+          th.addEventListener('click', async () => {
               const col = th.getAttribute('data-sort');
+              if (col === "eventStart" && !await ensureLicenseStateLoaded()) {
+                  showProPrompt("開賽時間排序屬於 Pro 功能。");
+                  return;
+              }
               if (window.slbSortCol === col) {
                   window.slbSortDesc = !window.slbSortDesc;
               } else {
@@ -2708,6 +2733,7 @@
                                       id: item.idFOBet || item.id || betId,
                                       fullExternalReference: betId,
                                       createdDate: item.tsAttempted,
+                                      eventStartTime: item.tsEventTime || null,
                                       betTypeName: item.betTypeName,
                                       betState: item.betState,
                                       totalStake: item.totalStake || item.wunitStake || 0,
@@ -2721,11 +2747,13 @@
                               if (!savedBet.odds && Number.isFinite(totalMultiBetOdds) && totalMultiBetOdds > 0) {
                                   savedBet.odds = totalMultiBetOdds;
                               }
+                              savedBet.eventStartTime = getEarlierTimeValue(savedBet.eventStartTime, item.tsEventTime);
                               savedBet.legs.push({
                                   idFOSportType: item.idFOSportType,
                                   idFOSport: item.idFOSport,
                                   tournamentName: item.tournamentName,
                                   eventName: item.eventName,
+                                  eventStartTime: item.tsEventTime || null,
                                   eventResult: item.eventResult,
                                   marketName: item.marketName,
                                   selectionName: item.selectionName,
