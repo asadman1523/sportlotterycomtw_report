@@ -25,7 +25,15 @@ jobs:
       - name: Generate Release Notes
         run: |
           set -euo pipefail
-          previous_tag="$(git tag --sort=-v:refname | head -n 1 || true)"
+          current_commit="$(git rev-parse HEAD)"
+          previous_tag=""
+          while IFS= read -r tag; do
+            tag_commit="$(git rev-list -n 1 "$tag")"
+            if [ "$tag_commit" != "$current_commit" ]; then
+              previous_tag="$tag"
+              break
+            fi
+          done < <(git tag --sort=-v:refname --merged HEAD)
 
           {
             echo "## 這次更動"
