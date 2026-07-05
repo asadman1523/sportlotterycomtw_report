@@ -529,7 +529,19 @@ test("loaded chunks are rendered before the full search completes", () => {
 test("event start time is stored on bets and legs", () => {
     assert.match(source, /eventStartTime:\s*item\.tsEventTime \|\| null/);
     assert.match(source, /savedBet\.eventStartTime = getEarlierTimeValue\(savedBet\.eventStartTime, item\.tsEventTime\);/);
-    assert.match(source, /savedBet\.legs\.push\(\{[\s\S]*eventStartTime:\s*item\.tsEventTime \|\| null[\s\S]*eventResult:\s*item\.eventResult/);
+    assert.match(source, /savedBet\.legs\.push\(\{[\s\S]*eventStartTime:\s*item\.tsEventTime \|\| null[\s\S]*eventResult:\s*formatEventResultForDisplay\(item\.eventResult\)/);
+});
+
+test("event result scores are displayed in away-home order", () => {
+    const helpers = vm.runInNewContext([
+        functionBlock("formatEventResultForDisplay"),
+        "({ formatEventResultForDisplay })",
+    ].join("\n"));
+
+    assert.equal(helpers.formatEventResultForDisplay("1:2"), "2:1");
+    assert.equal(helpers.formatEventResultForDisplay(" 0：1 "), "1:0");
+    assert.equal(helpers.formatEventResultForDisplay("Cancelled"), "Cancelled");
+    assert.equal(helpers.formatEventResultForDisplay(""), "");
 });
 
 test("multi-leg event start time uses the earliest valid leg time", () => {
@@ -568,7 +580,7 @@ test("multi-leg rows preserve and display per-leg settlement status", () => {
     assert.match(source, /function getLegStatusKey\(leg\)/);
     assert.match(source, /betLegStatus:\s*item\.betLegStatus/);
     assert.match(source, /winWLDOutcome:\s*item\.winWLDOutcome/);
-    assert.match(source, /eventResult:\s*item\.eventResult/);
+    assert.match(source, /eventResult:\s*formatEventResultForDisplay\(item\.eventResult\)/);
     assert.match(source, /slb-leg-status-icon-win/);
     assert.match(source, /slb-leg-status-icon-lose/);
     assert.match(source, /slb-leg-status-icon-pending/);

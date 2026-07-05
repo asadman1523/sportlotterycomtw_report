@@ -840,6 +840,13 @@
       return current;
   }
 
+  function formatEventResultForDisplay(eventResult) {
+      const text = String(eventResult || "").trim();
+      const scoreMatch = text.match(/^(\d+)\s*[:：]\s*(\d+)$/);
+      if (!scoreMatch) return text;
+      return `${scoreMatch[2]}:${scoreMatch[1]}`;
+  }
+
   function formatBetDateTime(value) {
       const sortValue = getTimeSortValue(value);
       if (sortValue === null) return "-";
@@ -2754,7 +2761,7 @@
                                   tournamentName: item.tournamentName,
                                   eventName: item.eventName,
                                   eventStartTime: item.tsEventTime || null,
-                                  eventResult: item.eventResult,
+                                  eventResult: formatEventResultForDisplay(item.eventResult),
                                   marketName: item.marketName,
                                   selectionName: item.selectionName,
                                   betLegStatus: item.betLegStatus,
