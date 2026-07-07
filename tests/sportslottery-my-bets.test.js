@@ -108,20 +108,26 @@ test("return and profit-loss display stays on one line", () => {
     );
 });
 
-test("date shortcut buttons include hour and day ranges", () => {
-    const proButtons = [
-        ["slb-date-1h", "1小時", 1],
-        ["slb-date-3h", "3小時", 3],
-        ["slb-date-6h", "6小時", 6],
-        ["slb-date-12h", "12小時", 12],
+test("date shortcut buttons include focused day ranges", () => {
+    const proDayButtons = [
+        ["slb-date-today", "今日", 0],
+        ["slb-date-yesterday", "昨日", 1],
     ];
-    for (const [id, label, hours] of proButtons) {
+    for (const [id, label, offset] of proDayButtons) {
         const button = buttonById(id);
         assert.match(button, /slb-date-shortcut-pro/);
         assert.match(button, new RegExp(`>${label}<span class="slb-pro-flag">PRO</span></button>`));
-        assert.match(source, new RegExp(`setupHourShortcutButton\\("${id}",\\s*${hours},\\s*true\\);`));
+        assert.match(source, new RegExp(`setupSingleDayShortcutButton\\("${id}",\\s*${offset},\\s*"${label}",\\s*true\\);`));
     }
 
+    assert.doesNotMatch(source, /id="slb-date-1h"/);
+    assert.doesNotMatch(source, /id="slb-date-3h"/);
+    assert.doesNotMatch(source, /id="slb-date-6h"/);
+    assert.doesNotMatch(source, /id="slb-date-12h"/);
+    assert.doesNotMatch(source, /setupHourShortcutButton\("slb-date-1h"/);
+    assert.doesNotMatch(source, /setupHourShortcutButton\("slb-date-3h"/);
+    assert.doesNotMatch(source, /setupHourShortcutButton\("slb-date-6h"/);
+    assert.doesNotMatch(source, /setupHourShortcutButton\("slb-date-12h"/);
     assert.match(buttonById("slb-date-24h"), />24小時<\/button>/);
     assert.match(buttonById("slb-date-7d"), />7天<\/button>/);
     assert.match(buttonById("slb-date-30d"), />30天<\/button>/);
@@ -387,7 +393,7 @@ test("pro license state uses a Google-account-bound SLB2 signed activation code"
 test("free users are gated from pro shortcuts before manual fetch is posted", () => {
     assert.match(
         source,
-        /if \(requiresPro && !await ensureLicenseStateLoaded\(\)\) \{[\s\S]*showProPrompt\(`\$\{hours\}小時快捷查詢屬於 Pro 功能。`\);[\s\S]*return;[\s\S]*\}[\s\S]*await fetchManualQuery/
+        /if \(requiresPro && !await ensureLicenseStateLoaded\(\)\) \{[\s\S]*showProPrompt\(`\$\{label\}快捷查詢屬於 Pro 功能。`\);[\s\S]*return;[\s\S]*\}[\s\S]*document\.getElementById\("slb-date-search"\)\.click\(\);/
     );
     assert.match(
         source,
@@ -556,6 +562,14 @@ test("multi-leg event start time uses the earliest valid leg time", () => {
     );
     assert.equal(helpers.getEarlierTimeValue(null, "2026-07-04 09:30:00"), "2026-07-04 09:30:00");
     assert.equal(helpers.getEarlierTimeValue("2026-07-04 09:30:00", null), "2026-07-04 09:30:00");
+});
+
+test("event start time sort falls back to bet time", () => {
+    const block = functionBlock("renderBets");
+    assert.match(
+        block,
+        /window\.slbSortCol === 'eventStart'[\s\S]*const eventStartSort = compareSortValues\(valA, valB, window\.slbSortDesc\);[\s\S]*if \(eventStartSort !== 0\) return eventStartSort;[\s\S]*valA = getTimeSortValue\(a\.createdDate\) \|\| 0;[\s\S]*valB = getTimeSortValue\(b\.createdDate\) \|\| 0;[\s\S]*return compareSortValues\(valA, valB, window\.slbSortDesc\);/
+    );
 });
 
 test("unsettled bets do not show potential return as actual payout", () => {

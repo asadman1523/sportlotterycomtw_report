@@ -840,6 +840,12 @@
       return current;
   }
 
+  function compareSortValues(valA, valB, desc) {
+      if (valA < valB) return desc ? 1 : -1;
+      if (valA > valB) return desc ? -1 : 1;
+      return 0;
+  }
+
   function formatEventResultForDisplay(eventResult) {
       const text = String(eventResult || "").trim();
       const scoreMatch = text.match(/^(\d+)\s*[:：]\s*(\d+)$/);
@@ -1781,10 +1787,8 @@
                                     <span>~</span>
                                     <input type="date" id="slb-date-to" class="slb-date-input">
                                     <button id="slb-date-search" class="slb-date-search-btn">搜尋</button>
-                                    <button id="slb-date-1h" class="slb-date-shortcut slb-date-shortcut-pro" style="margin-left:4px;">1小時<span class="slb-pro-flag">PRO</span></button>
-                                    <button id="slb-date-3h" class="slb-date-shortcut slb-date-shortcut-pro">3小時<span class="slb-pro-flag">PRO</span></button>
-                                    <button id="slb-date-6h" class="slb-date-shortcut slb-date-shortcut-pro">6小時<span class="slb-pro-flag">PRO</span></button>
-                                    <button id="slb-date-12h" class="slb-date-shortcut slb-date-shortcut-pro">12小時<span class="slb-pro-flag">PRO</span></button>
+                                    <button id="slb-date-today" class="slb-date-shortcut slb-date-shortcut-pro" style="margin-left:4px;">今日<span class="slb-pro-flag">PRO</span></button>
+                                    <button id="slb-date-yesterday" class="slb-date-shortcut slb-date-shortcut-pro">昨日<span class="slb-pro-flag">PRO</span></button>
                                     <button id="slb-date-24h" class="slb-date-shortcut">24小時</button>
                                     <button id="slb-date-7d" class="slb-date-shortcut">7天</button>
                                     <button id="slb-date-30d" class="slb-date-shortcut">30天</button>
@@ -2010,10 +2014,26 @@
                     document.getElementById("slb-date-search").click();
                 });
             };
-            setupHourShortcutButton("slb-date-1h", 1, true);
-            setupHourShortcutButton("slb-date-3h", 3, true);
-            setupHourShortcutButton("slb-date-6h", 6, true);
-            setupHourShortcutButton("slb-date-12h", 12, true);
+
+            const setupSingleDayShortcutButton = (buttonId, dayOffset, label, requiresPro = false) => {
+                const button = document.getElementById(buttonId);
+                if (!button) return;
+                button.addEventListener("click", async () => {
+                    if (requiresPro && !await ensureLicenseStateLoaded()) {
+                        showProPrompt(`${label}快捷查詢屬於 Pro 功能。`);
+                        return;
+                    }
+                    const target = new Date();
+                    target.setDate(target.getDate() - dayOffset);
+                    const fromEl = document.getElementById("slb-date-from");
+                    const toEl = document.getElementById("slb-date-to");
+                    if(fromEl) fromEl.value = formatD(target);
+                    if(toEl) toEl.value = formatD(target);
+                    document.getElementById("slb-date-search").click();
+                });
+            };
+            setupSingleDayShortcutButton("slb-date-today", 0, "今日", true);
+            setupSingleDayShortcutButton("slb-date-yesterday", 1, "昨日", true);
             setupHourShortcutButton("slb-date-24h", 24);
             setupDateShortcutButton("slb-date-7d", 7);
             setupDateShortcutButton("slb-date-30d", 30);
@@ -2346,6 +2366,11 @@
               if (valA === null && valB === null) return 0;
               if (valA === null) return 1;
               if (valB === null) return -1;
+              const eventStartSort = compareSortValues(valA, valB, window.slbSortDesc);
+              if (eventStartSort !== 0) return eventStartSort;
+              valA = getTimeSortValue(a.createdDate) || 0;
+              valB = getTimeSortValue(b.createdDate) || 0;
+              return compareSortValues(valA, valB, window.slbSortDesc);
           } else if (window.slbSortCol === 'type') {
               valA = a.betTypeName || "單場";
               valB = b.betTypeName || "單場";
@@ -2363,9 +2388,7 @@
               valB = b.betState || "";
           }
 
-          if (valA < valB) return window.slbSortDesc ? 1 : -1;
-          if (valA > valB) return window.slbSortDesc ? -1 : 1;
-          return 0;
+          return compareSortValues(valA, valB, window.slbSortDesc);
       });
 
       window.currentSLBBets = sortedBets;
