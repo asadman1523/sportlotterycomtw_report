@@ -44,9 +44,10 @@ jobs:
             else
               range="-n 10"
             fi
-            while IFS=$'\t' read -r hash subject; do
+            while IFS=$'\t' read -r hash subject || [ -n "$hash" ]; do
               files="$(git diff-tree --no-commit-id --name-only -r "$hash")"
-              if [ "$files" = "AGENTS.md" ]; then
+              public_files="$(printf "%s\n" "$files" | grep -Ev '^(AGENTS\.md|\.github/)' || true)"
+              if [ -z "$public_files" ]; then
                 continue
               fi
               echo "- ${subject} (${hash:0:7})"
