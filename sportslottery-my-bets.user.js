@@ -108,6 +108,23 @@
     option: "\u6295\u6ce8\u9078\u9805",
   };
 
+  function formatLocalDateTime(d) {
+      const pad = n => n.toString().padStart(2, '0');
+      return d.getFullYear() + '-' +
+             pad(d.getMonth() + 1) + '-' +
+             pad(d.getDate()) + 'T' +
+             pad(d.getHours()) + ':' +
+             pad(d.getMinutes()) + ':' +
+             pad(d.getSeconds()) + '.' +
+             d.getMilliseconds().toString().padStart(3, '0');
+  }
+
+  function getDefault24HourQuery() {
+      const now = new Date();
+      const past24Hours = new Date(now.getTime() - DAY_MS);
+      return `from=${formatLocalDateTime(past24Hours)}&to=${formatLocalDateTime(now)}`;
+  }
+
   window.slbSelectedSportTypes = window.slbSelectedSportTypes || [];
   window.slbSelectedPayoutStatuses = window.slbSelectedPayoutStatuses || [];
   window.slbSelectedParlayCounts = window.slbSelectedParlayCounts || [];
@@ -142,7 +159,7 @@
               const acceptedDisclaimer = await ensureDisclaimerStateLoaded();
               if (!autoCollectTriggered && acceptedDisclaimer) {
                   autoCollectTriggered = true;
-                  await fetchAndPostData(cachedApiQueryStr);
+                  await fetchAndPostData(getDefault24HourQuery());
               } else if (!acceptedDisclaimer && window.parent && window.parent !== window) {
                   window.parent.postMessage({ type: 'SLB_DISCLAIMER_REQUIRED' }, '*');
               }
@@ -163,7 +180,7 @@
           disclaimerAcceptedInThisPage = true;
           if (location.href.includes("www-talo-ssb-pr") && cachedApiBaseUrl && cachedApiHeaders && !autoCollectTriggered) {
               autoCollectTriggered = true;
-              await fetchAndPostData(cachedApiQueryStr);
+              await fetchAndPostData(getDefault24HourQuery());
           }
       }
       
@@ -1925,11 +1942,11 @@
             const fromEl = document.getElementById("slb-date-from");
             const toEl = document.getElementById("slb-date-to");
             if (fromEl && toEl) {
-                const today = new Date();
-                const past30 = new Date(); past30.setDate(today.getDate() - 30);
+                const now = new Date();
+                const past24Hours = new Date(now.getTime() - DAY_MS);
                 const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
-                fromEl.value = formatD(past30);
-                toEl.value = formatD(today);
+                fromEl.value = formatD(past24Hours);
+                toEl.value = formatD(now);
             }
 
             const formatD = d => d.getFullYear() + '-' + (d.getMonth() + 1).toString().padStart(2, '0') + '-' + d.getDate().toString().padStart(2, '0');
@@ -2618,16 +2635,7 @@
 
       const localDatabase = new Map();
 
-      const formatLocal = (d) => {
-          const pad = n => n.toString().padStart(2, '0');
-          return d.getFullYear() + '-' +
-                 pad(d.getMonth() + 1) + '-' +
-                 pad(d.getDate()) + 'T' +
-                 pad(d.getHours()) + ':' +
-                 pad(d.getMinutes()) + ':' +
-                 pad(d.getSeconds()) + '.' +
-                 d.getMilliseconds().toString().padStart(3, '0');
-      };
+      const formatLocal = formatLocalDateTime;
 
       const parseApiDate = (value) => {
           const parsed = new Date(value);
@@ -2689,11 +2697,10 @@
       }
 
       if (!fromStr || !toStr) {
-          const today = new Date();
-          const past30 = new Date();
-          past30.setDate(today.getDate() - 30);
-          fromStr = formatLocal(past30);
-          toStr = formatLocal(today);
+          const now = new Date();
+          const past24Hours = new Date(now.getTime() - DAY_MS);
+          fromStr = formatLocal(past24Hours);
+          toStr = formatLocal(now);
       }
 
       const requestedFromStr = fromStr;

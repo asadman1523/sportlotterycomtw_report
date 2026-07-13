@@ -139,6 +139,17 @@ test("date shortcut buttons include focused day ranges", () => {
     assert.match(source, /setupDateShortcutButton\("slb-date-30d",\s*30\);/);
 });
 
+test("opening the report defaults to the latest 24 hours", () => {
+    assert.match(source, /function getDefault24HourQuery\(\)/);
+    assert.match(source, /const past24Hours = new Date\(now\.getTime\(\) - DAY_MS\);/);
+    assert.equal(
+        (source.match(/await fetchAndPostData\(getDefault24HourQuery\(\)\);/g) || []).length,
+        2
+    );
+    assert.doesNotMatch(source, /await fetchAndPostData\(cachedApiQueryStr\);/);
+    assert.doesNotMatch(source, /const past30 = new Date\(\);/);
+});
+
 test("loading status appears after the collapse toggle in the header", () => {
     const toggleIndex = source.indexOf('id="slb-report-toggle"');
     const statusIndex = source.indexOf('id="slb-header-status-text"');
